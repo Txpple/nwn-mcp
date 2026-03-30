@@ -1,0 +1,37 @@
+{
+  "name": "nwn-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs');const p=require('path');const s=p.join('src','templates');const d=p.join('dist','templates');fs.mkdirSync(d,{recursive:true});fs.readdirSync(s).forEach(f=>fs.copyFileSync(p.join(s,f),p.join(d,f)))\"",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "lint": "biome lint src/",
+    "format": "biome format --write src/",
+    "check": "biome check src/"
+  },
+  "keywords": [
+    "nwn",
+    "mcp",
+    "neverwinter"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "MCP server for Neverwinter Nights Enhanced Edition module files",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "fzstd": "^0.1.1",
+    "sql.js": "^1.14.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.9",
+    "@types/node": "^25.5.0",
+    "@types/sql.js": "^1.4.11",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^3.1.0"
+  }
+}

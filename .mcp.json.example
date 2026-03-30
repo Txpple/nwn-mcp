@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "nwn-mcp": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "/path/to/nwn-mcp",
+      "env": {
+        "NIM_FOLDER_NWTOOLS": "/path/to/neverwinter-nim-tools",
+        "NWN_FOLDER_DATA": "/path/to/Neverwinter Nights",
+        "NWN_FOLDER_USER": "/path/to/Documents/Neverwinter Nights",
+        "MCP_FOLDER_USERREPORTS": "/path/to/reports"
+      }
+    }
+  }
+}
