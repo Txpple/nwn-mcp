@@ -84,7 +84,7 @@ function makeGitDoc(): GffDocument {
     "Placeable List": { type: "list", value: [] },
     "Door List": { type: "list", value: [] },
     "Encounter List": { type: "list", value: [] },
-    "Trigger List": { type: "list", value: [] },
+    "TriggerList": { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },

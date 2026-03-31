@@ -90,7 +90,7 @@ function makeGitDoc(): GffDocument {
     "Placeable List": { type: "list", value: [] },
     "Door List": { type: "list", value: [] },
     "Encounter List": { type: "list", value: [] },
-    "Trigger List": { type: "list", value: [] },
+    "TriggerList": { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },
@@ -312,11 +312,11 @@ describe("create_area_transition", () => {
 
       // Verify trigger placed in source area
       const sourceGit = mockIndex.parsedGff.get("forest.git") as GffObj;
-      const triggers = (sourceGit["Trigger List"] as { value: GffObj[] }).value;
+      const triggers = (sourceGit["TriggerList"] as { value: GffObj[] }).value;
       expect(triggers.length).toBe(1);
       expect((triggers[0].Tag as { value: string }).value).toBe("tr_forest_to_cave");
       expect((triggers[0].LinkedTo as { value: string }).value).toBe("wp_forest_to_cave");
-      expect((triggers[0].LinkedToFlags as { value: number }).value).toBe(1);
+      expect((triggers[0].LinkedToFlags as { value: number }).value).toBe(2);
 
       // Verify waypoint placed in target area
       const targetGit = mockIndex.parsedGff.get("cave.git") as GffObj;

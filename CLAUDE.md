@@ -115,9 +115,10 @@ Returns type-specific summaries (utc: CR/race/classes, uti: baseItem/cost, etc.)
 
 ## Area Transitions
 
-Two mechanisms for moving between areas:
+Three mechanisms for moving between areas:
 - **`link_doors`** — bidirectional door-to-door linking. Doors are two-way objects.
-- **`create_area_transition`** — one-way trigger→waypoint transition. Places a trigger in the source area and a waypoint in the target area, writes + compiles a `JumpToObject` script, and sets `LinkedTo`/`LinkedToFlags` metadata for connectivity checks. Call twice with swapped source/target for two-way transitions.
+- **`create_area_transition`** — one-way trigger→waypoint transition. Places an Area Transition trigger (Type=1, LinkedToFlags=2=Waypoint) in the source area and a waypoint in the target area. Call twice with swapped source/target for two-way transitions.
+- **`create_adventure_transition`** — one-way portal for adventure modules. Places a useable blue shaft of light (`plc_solblue`) with an OnUsed script that opens a dialog ("Step through?" / "Turn away"). On confirmation, plays VFX_FNF_SUMMON_MONSTER_2 and jumps the PC to the destination waypoint after 2 seconds. The `/create-adventure` pipeline uses this exclusively instead of `create_area_transition`.
 
 ## Trap Blueprints
 
@@ -135,13 +136,23 @@ Two mechanisms for moving between areas:
 
 All placement and movement tools **block** if the target position is non-walkable or within 1m of a non-walkable surface. Uses `checkPlacementWalkable()` in `walkmesh.ts` which checks the target point plus 4 cardinal probes at 1m distance.
 
-**Enforced on:** `place_creature`, `place_placeable`, `place_waypoint`, `place_trigger`, `place_encounter`, `place_store`, `move_object`, `bulk_move_objects`, `create_area_transition` (both source and target positions).
+**Enforced on:** `place_creature`, `place_placeable`, `place_waypoint`, `place_trigger`, `place_encounter`, `place_store`, `move_object`, `bulk_move_objects`, `create_area_transition`, `create_adventure_transition` (both source and target positions).
 
 **Excluded:** `place_door` (doors sit at tile boundaries near walls), `place_sound` (audio sources don't need walkable positions), movement of Door List and SoundList objects.
 
 ## Zone-Based Terrain Solver
 
 `paint_terrain` takes terrain zones + crosser paths and re-solves ALL non-feature tiles via a corner grid approach (`src/util/zone-solver.ts`). Feature tiles (from `paint_feature`) are preserved automatically. `paint_tiles` is for exact tileId manual overrides only.
+
+### Terrain Adjacency Constraint
+
+**Zone layouts must respect tileset terrain adjacency chains.** Tilesets only have transition tiles between specific terrain pairs. If two terrains can't transition directly, a buffer zone of the intermediate terrain is REQUIRED — the solver will NOT fabricate intermediate terrains.
+
+**Before designing zones**, call `get_tileset_details` and check which terrains have transition tiles between them. Common adjacency chains:
+- `tno01` (Castle Exterior Rural): `Trees → Grass → CastleWall → Dirt`
+- `ttr01` (Rural): `Trees → Grass` (+ Water, Dirt variants)
+
+You cannot skip terrains in the chain. For example, in `tno01` you must place a 1-tile `Grass` zone between `Trees` and `CastleWall` — no direct Trees↔CastleWall transition tiles exist. The solver will warn and fall back to incorrect tiles if adjacencies are invalid.
 
 ## Known Pitfalls
 
@@ -159,3 +170,10 @@ All placement and movement tools **block** if the target position is non-walkabl
 - **Tileset door placement.** Each tile's .set file has `[TILE<id>DOOR<n>]` subsections with local-space offsets. Use `getTileDoorWorldPositions()` in `tileset.ts` to convert to world space. Never guess door positions.
 - **CPDB blob format.** Campaign database blobs (compressed=1) use a 24-byte header (`"CPDB"` + version + fields) followed by zstd-compressed data (NOT zlib). The payload is JSON text, not binary GFF. Vartype codes are ASCII chars: F=70 float, I=73 int, J=74 json, L=76 location, O=79 object, S=83 string, V=86 vector. F/I/L/V are uncompressed ASCII; J/O/S are CPDB/zstd compressed.
 - **Database files are `.sqlite3`**, not `.sqlite`. Located in `NWN_FOLDER_USER/database/`.
+- **GIT trigger field name is `TriggerList`** (no space), not `"Trigger List"`. Other no-space list names: `SoundList`, `StoreList`, `WaypointList`. With-space names: `Creature List`, `Door List`, `Encounter List`, `Placeable List`.
+- **Triggers need Geometry in placed instances.** UTT blueprints from resman do NOT contain geometry. When placing triggers, always ensure the `Geometry` list field exists with at least 4 vertices (PointX/PointY/PointZ). Without geometry, the engine won't detect entry and the toolset won't render the trigger.
+- **GIC must be synced with GIT.** The toolset uses the GIC file to index objects in an area. `writeBackGit()` automatically syncs the GIC. Without GIC entries, objects exist in the GIT but the toolset doesn't show them.
+- **Placeable display name field is `LocName`**, not `LocalizedName`. Setting `LocalizedName` on a placeable has no effect — the toolset and engine read `LocName` (a cexolocstring).
+- **Placement Z height from walkmesh.** All placement tools automatically set the object's Z position from the walkmesh surface height. The walkmesh check returns the highest walkable face Z at the position. Use `fix_object_heights` to retroactively fix objects placed before this feature.
+- **Zone solver rejects incompatible adjacencies.** `paint_terrain` returns early with zero placements and `INCOMPATIBLE TERRAIN ADJACENCY` errors if the zone layout contains terrain pairs with no transition tiles. Fix the zone layout, don't retry.
+- **`fallbackSubstitute` is constrained.** The zone solver's fallback only tries terrains present in the corner grid (zone-defined + default). It will never inject an alien terrain.

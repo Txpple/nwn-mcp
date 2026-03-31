@@ -139,7 +139,7 @@ function makeGitDoc(creatureCount: number, placeableCount: number, doorCount: nu
     "Placeable List": { type: "list", value: makeList(placeableCount, 9) },
     "Door List": { type: "list", value: makeList(doorCount, 8) },
     "Encounter List": { type: "list", value: [] },
-    "Trigger List": { type: "list", value: [] },
+    "TriggerList": { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },

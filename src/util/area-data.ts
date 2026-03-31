@@ -404,7 +404,7 @@ export function extractAreaObjects(index: ModuleIndex, areaResref: string): Area
     { field: "Door List", type: "door", posFields: "XY" },
     { field: "Placeable List", type: "placeable", posFields: "XY" },
     { field: "WaypointList", type: "waypoint", posFields: "XPos" },
-    { field: "Trigger List", type: "trigger", posFields: "XPos" },
+    { field: "TriggerList", type: "trigger", posFields: "XPos" },
     { field: "Encounter List", type: "encounter", posFields: "XPos" },
     { field: "SoundList", type: "sound", posFields: "XPos" },
     { field: "StoreList", type: "store", posFields: "XPos" },

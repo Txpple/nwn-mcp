@@ -90,10 +90,14 @@ export function getFieldLocStr(obj: Record<string, unknown>, fieldName: string):
   return getLocString(getField(obj, fieldName));
 }
 
-/** Get field as list (array of structs) */
+/** Get field as list (array of structs). Creates the field if missing so pushes are never lost. */
 export function getFieldList(obj: Record<string, unknown>, fieldName: string): Record<string, unknown>[] {
   const val = getField(obj, fieldName);
-  return Array.isArray(val) ? val as Record<string, unknown>[] : [];
+  if (Array.isArray(val)) return val as Record<string, unknown>[];
+  // Field missing — create it so callers can push() and have it persist
+  const arr: Record<string, unknown>[] = [];
+  obj[fieldName] = { type: "list", value: arr };
+  return arr;
 }
 
 // ─── Setters ────────────────────────────────────────────────────────────────

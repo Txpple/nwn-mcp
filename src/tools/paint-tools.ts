@@ -134,7 +134,7 @@ export function registerPaintTools(server: McpServer): void {
         "Placeable List": { type: "list", value: [] },
         SoundList: { type: "list", value: [] },
         StoreList: { type: "list", value: [] },
-        "Trigger List": { type: "list", value: [] },
+        "TriggerList": { type: "list", value: [] },
         WaypointList: { type: "list", value: [] },
         "List": { type: "list", value: [] },
         AreaProperties: {
@@ -162,7 +162,7 @@ export function registerPaintTools(server: McpServer): void {
         "Placeable List": { type: "list", value: [] },
         SoundList: { type: "list", value: [] },
         StoreList: { type: "list", value: [] },
-        "Trigger List": { type: "list", value: [] },
+        "TriggerList": { type: "list", value: [] },
         WaypointList: { type: "list", value: [] },
       };
 

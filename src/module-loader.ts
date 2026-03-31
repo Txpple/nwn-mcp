@@ -403,7 +403,7 @@ function guessListObjectType(fieldName: string): string {
     "Creature List": "creature",
     "Placeable List": "placeable",
     "Door List": "door",
-    "Trigger List": "trigger",
+    "TriggerList": "trigger",
     "WaypointList": "waypoint",
     "Encounter List": "encounter",
     "SoundList": "sound",
@@ -436,7 +436,7 @@ function buildAreaSummary(
     placeableCount: git ? getFieldList(git, "Placeable List").length : 0,
     doorCount: git ? getFieldList(git, "Door List").length : 0,
     encounterCount: git ? getFieldList(git, "Encounter List").length : 0,
-    triggerCount: git ? getFieldList(git, "Trigger List").length : 0,
+    triggerCount: git ? getFieldList(git, "TriggerList").length : 0,
     waypointCount: git ? getFieldList(git, "WaypointList").length : 0,
   };
 }

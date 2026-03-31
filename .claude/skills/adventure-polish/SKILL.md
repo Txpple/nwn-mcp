@@ -107,7 +107,7 @@ For each area documented in `## Areas`, check that all transitions are working.
 
 **Step 2:** Cross-check against the transitions table in `## Areas`. Every documented transition should have triggers in both directions. Example: if area A links to area B, area B must have a return trigger linking back to area A.
 
-**Step 3:** Fix any missing transitions with `create_area_transition`. Ensure each transition trigger has a matching `plc_solblue` blue light marker at the same position.
+**Step 3:** Fix any missing transitions with `create_adventure_transition`. Each portal is a useable blue shaft of light with a dialog — no separate visual marker needed.
 
 **Step 4:** Verify the starting area is reachable. Check `get_module_info` for `Mod_Entry_Area` — it should point to the safe starting area (inn, town, etc.).
 

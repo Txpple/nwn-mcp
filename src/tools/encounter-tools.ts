@@ -15,7 +15,7 @@ export function registerEncounterTools(server: McpServer): void {
       const gitDoc = index.parsedGff.get(`${area}.git`);
       if (!gitDoc) return { content: [{ type: "text", text: `Area not found: ${area}` }] };
 
-      const triggerList = getFieldList(gitDoc as GffObj, "Trigger List");
+      const triggerList = getFieldList(gitDoc as GffObj, "TriggerList");
       const triggers = triggerList.map(t => ({
         tag: getFieldStr(t, "Tag"),
         name: getFieldLocStr(t, "LocalizedName"),

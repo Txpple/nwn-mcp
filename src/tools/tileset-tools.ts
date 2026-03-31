@@ -408,7 +408,7 @@ export function buildTagToAreaMap(index: ModuleIndex): Map<string, string> {
   return tagToArea;
 }
 
-/** Get all area transitions (doors + triggers with LinkedToFlags=1) for a single area */
+/** Get all area transitions (doors with LinkedToFlags=1, triggers with LinkedToFlags=1 or 2) for a single area */
 export function buildAreaTransitions(index: ModuleIndex, areaResref: string, tagToArea: Map<string, string>): AreaTransitionInfo[] {
   const gitDoc = index.parsedGff.get(`${areaResref}.git`);
   if (!gitDoc) return [];
@@ -424,13 +424,22 @@ export function buildAreaTransitions(index: ModuleIndex, areaResref: string, tag
     transitions.push({ x: gffGetNum(door, "X"), y: gffGetNum(door, "Y"), targetArea: toArea });
   }
 
-  for (const trigger of gffGetList(git, "Trigger List")) {
+  for (const trigger of gffGetList(git, "TriggerList")) {
     const linkedTo = gffGetStr(trigger, "LinkedTo");
     const linkedToFlags = gffGetNum(trigger, "LinkedToFlags");
-    if (!linkedTo || linkedToFlags !== 1) continue;
+    if (!linkedTo || (linkedToFlags !== 1 && linkedToFlags !== 2)) continue;
     const toArea = tagToArea.get(linkedTo);
     if (!toArea || toArea === areaResref) continue;
     transitions.push({ x: gffGetNum(trigger, "XPosition"), y: gffGetNum(trigger, "YPosition"), targetArea: toArea });
+  }
+
+  // Also check placeables with LinkedTo (adventure transition lights)
+  for (const plc of gffGetList(git, "Placeable List")) {
+    const linkedTo = gffGetStr(plc, "LinkedTo");
+    if (!linkedTo) continue;
+    const toArea = tagToArea.get(linkedTo);
+    if (!toArea || toArea === areaResref) continue;
+    transitions.push({ x: gffGetNum(plc, "X"), y: gffGetNum(plc, "Y"), targetArea: toArea });
   }
 
   return transitions;

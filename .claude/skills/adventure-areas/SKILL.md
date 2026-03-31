@@ -118,7 +118,7 @@ Propose area dimensions based on the plot's description of the location's scale:
 - Medium area: 12x12 to 14x14
 - Large exploration area: 16x16 to 18x18
 
-Plan the terrain layout: which zones go where, what crossers are needed, what multi-tile features to place. Use the exterior/interior guidelines below.
+Plan the terrain layout: which zones go where, what crossers are needed, what multi-tile features to place. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
 
 Only call `get_tileset_details` if you need specific group names for `paint_feature`. `list_tilesets` is sufficient for terrain/crosser planning.
 
@@ -142,6 +142,15 @@ Execute in this order:
    - **Exterior areas:** The entire perimeter ring must be covered by impassable terrain — Trees, Cliffs, Rocky, Mountains, or the tileset's equivalent border terrain. Do NOT place Grass, Dirt, Sand, Road, or any walkable terrain on perimeter tiles. Do NOT extend crosser paths into the perimeter — the solver automatically trims crossers from border tiles. Crossers should start/end at the first/last walkable tile inside the perimeter (row 1, row height-2, col 1, col width-2).
 
    When building your terrain zones for `paint_terrain`, explicitly ensure every zone rectangle starts at row/column 1 (not 0) and ends at max-1 (not max). Leave the perimeter untouched as default terrain for interior, or explicitly assign border terrain for exterior.
+
+   **CRITICAL — Terrain adjacency chains:**
+
+   Tilesets only have transition tiles between specific terrain pairs. You CANNOT place two terrains next to each other if the tileset has no transition tiles between them — the solver will produce broken results. **Before designing zones, check adjacency compatibility.** Common chains:
+   - `tno01` (Castle Exterior Rural): `Trees → Grass → CastleWall → Dirt` — you MUST place a Grass buffer zone between Trees and CastleWall.
+   - `ttr01` (Rural): `Trees → Grass` (+ Water, Dirt variants)
+   - For unfamiliar tilesets, call `get_tileset_details` and examine which terrain pairs share transition tiles.
+
+   If your layout requires Trees next to CastleWall (e.g., a walled compound in a forest), add a 1-tile Grass zone between them. This is not optional — it is a tileset constraint.
 
 If the solver warns about missing tile combinations:
 - Simplify terrain (avoid 3+ terrain types meeting at one point)
@@ -179,7 +188,7 @@ Set ambient properties with `set_area_properties`. The reference tables below ar
 **Other settings:**
 - **Skybox** — exteriors: `skyBox: 1`. Interiors: `skyBox: 0`.
 - **Day/night cycle** — exteriors: `true`. Interiors: `false`.
-- **Fog** — `sunFogAmount` 0-255. Eerie = 60+, clear = 5-15.
+- **Fog** — Do NOT set `sunFogAmount` or `moonFogAmount` (leave at 0). Instead use `fogClipDist` to control fog density: 45 = very foggy, 80 = clear sky. Omit `fogClipDist` for no fog.
 - **Wind** — `windPower`: 0=calm, 1=light, 2=strong.
 - **Weather** — `chanceRain/Snow/Lightning` 0-100. Low values (5-15) for occasional weather.
 
@@ -216,37 +225,37 @@ Only call `visualize_area` if `paint_terrain` returned crosser mismatch warnings
 
 ### Phase 7: Link Area Transitions
 
-Use `create_area_transition` for ALL area transitions — do NOT use doors or `link_doors`. Triggers are simpler and more reliable. Doorway crossers (Corridor, Doorway) handle the visual passage between rooms; triggers handle the actual teleport between areas.
+Use `create_adventure_transition` for ALL area transitions — do NOT use doors, `link_doors`, or `create_area_transition`. The adventure pipeline uses the light-based transition tool exclusively.
 
-`create_area_transition` creates a one-way trigger→waypoint transition. The player walks into a trigger in area A and gets teleported to a waypoint in area B. For two-way connections, call `create_area_transition` **twice** with swapped source/target.
+`create_adventure_transition` creates a one-way area transition using a useable blue shaft of light ("Area Transition"). The player clicks the light, a dialog asks if they want to step through, and on confirmation a VFX plays and the PC teleports to the destination waypoint. For two-way connections, call `create_adventure_transition` **twice** with swapped source/target. No separate visual marker (`plc_solblue`) is needed — the portal IS the blue light.
 
-**CRITICAL: Tag length limit.** The transition script resref is `a_tr_<tag>`, and NWN resrefs are max 16 characters. That means the `tag` parameter can be at most **11 characters** (`16 - 5` for the `a_tr_` prefix). Use short abbreviated tags like `vil_inn`, `inn_vil`, `vil_cry`, `cry_vil` — NOT `village_to_inn` (which truncates and collides with `village_to_crypt`). Every transition pair must have a **unique** tag that fits in 11 chars.
+**CRITICAL: Tag length limit.** The transition script resref is `a_at_<tag>`, and NWN resrefs are max 16 characters. That means the `tag` parameter can be at most **11 characters** (`16 - 5` for the `a_at_` prefix). Use short abbreviated tags like `vil_inn`, `inn_vil`, `vil_cry`, `cry_vil` — NOT `village_to_inn` (which truncates and collides with `village_to_crypt`). Every transition pair must have a **unique** tag that fits in 11 chars.
 
 ```
 # Village → Cave
-create_area_transition(
+create_adventure_transition(
   sourceArea: "village", sourceX: "85.0", sourceY: "45.0",
   targetArea: "cave", targetX: "15.0", targetY: "15.0",
   tag: "vil_cave"
 )
 
 # Cave → Village (return path)
-create_area_transition(
+create_adventure_transition(
   sourceArea: "cave", sourceX: "12.0", sourceY: "15.0",
   targetArea: "village", targetX: "82.0", targetY: "45.0",
   tag: "cave_vil"
 )
 ```
 
-The trigger geometry from the blueprint is typically ~1m×1m — small enough that the player walks through naturally. Place the target waypoint a few meters into the destination area so the player doesn't immediately re-trigger the return transition.
+The tool places a useable blue shaft of light ("Area Transition") with an OnUsed script that plays a teleport VFX and jumps the PC to the destination. No separate visual marker needed — the light IS the visual marker.
+
+Place the target waypoint at the same position as the destination portal. Since portals require clicking (not walk-through), there's no risk of re-triggering.
 
 **Transition placement rules:**
-- **On crosser paths (roads/streams):** Place the trigger on the **last crosser tile before the border** — the tile where the crosser ends. The solver trims crossers from border tiles automatically, so the last crosser tile is always at least 1 tile inside the playable area. Center the trigger on that tile (tile_col * 10 + 5, tile_row * 10 + 5).
-- **Without crossers:** Place the trigger on the walkable tile closest to the cliff/wall edge, centered on that tile. This is typically at row 1 or row (height-2), col 1 or col (width-2).
-- **At buildings/structures:** If a feature/group (lodge, temple, etc.) has a door that leads to another area, place the trigger directly in front of that door's world position. Use `get_tileset_details` to find the feature's `doorPlacements`, compute the door's world coordinates from the feature's grid position, and place the trigger on the walkable ground immediately in front of it.
-- **Never place triggers on border/transition tiles** (tiles where cliff/wall meets walkable terrain). These tiles have non-walkable surfaces and the placement tools will reject them. Always stay at least 1 tile inside the walkable area.
-
-**Visual marker:** After placing each transition trigger, place a blue shaft of light as a visual guide for the player: `place_placeable(area, blueprint: "plc_solblue", x, y)` centered on the same position as the trigger.
+- **On crosser paths (roads/streams):** Place the light on the **last crosser tile before the border** — the tile where the crosser ends. Center on that tile (tile_col * 10 + 5, tile_row * 10 + 5).
+- **Without crossers:** Place the light on the walkable tile closest to the cliff/wall edge. Typically at row 1 or row (height-2), col 1 or col (width-2).
+- **At buildings/structures:** Place the light directly in front of feature doors.
+- **Never place on border/transition tiles** (tiles where cliff/wall meets walkable terrain). Stay at least 1 tile inside the walkable area.
 
 ---
 
@@ -264,17 +273,24 @@ Repack the module with `repack_module`.
 
 ---
 
-## Exterior Tileset Layout Guidelines
+## CRITICAL — Area Layout Design (applies to ALL tilesets)
 
+**NEVER design an area as one big open space.** This is the single most important layout rule. Areas must have spatial structure — distinct zones connected by paths/passages. A large flat rectangle of the same terrain is boring to explore and looks artificial.
+
+**The rule: 30-50% of tiles should be "rooms" or clearings. The rest should be walls, trees, or other impassable terrain that creates corridors, paths, and chokepoints between the open spaces.**
+
+### Exterior areas:
 - **Edge encapsulation** — place Trees, Cliffs, Rocky, or other impassable terrain along all four edges. Areas shouldn't end with open ground at the border.
-- **Interior clearing** — 1-2 rows of border terrain on all sides with playable space carved out in the middle. Crossers terminate at the last walkable tile before the border — the solver strips them from border tiles automatically.
+- **Break up open space with terrain.** Don't carve one big clearing in the middle. Instead create multiple clearings (Grass, Dirt) separated by trees or rocks, connected by road/path crossers. Think of it as outdoor "rooms" — a village green, a market area, a garden, a courtyard — each separated by tree lines or terrain features.
+- **Use roads/streams as corridors.** Crosser paths (Road, Stream) through tree or rocky terrain create natural passages. These serve the same purpose as interior corridors.
+- **Example good layout (12x12 exterior):** Perimeter trees → 3 Grass clearings (3x3 each) separated by 2-tile tree strips → Road crosser connecting them north-south.
+- **Example bad layout:** Perimeter trees → one big 8x8 Grass rectangle in the middle. This is what the agent defaults to and it MUST be avoided.
 
-## Interior Tileset Layout Guidelines
-
-- **Perimeter must be Wall.** Never place floor/room/shop zones on the outermost row or column of tiles. The entire perimeter ring must remain the default Wall terrain so that every area-boundary edge has a solid wall. If a room or shop zone would touch the edge, shrink it inward by at least 1 tile.
-- **Use Corridor/Doorway crossers for passages between rooms.** These create the visual doorways. Area transitions use triggers, not door objects.
+### Interior areas:
+- **Perimeter must be Wall.** Never place floor/room/shop zones on the outermost row or column of tiles.
+- **Use Corridor/Doorway crossers for passages between rooms.** These create the visual doorways.
 - **Walls create structure.** Default Wall terrain is solid. Floor zones carve rooms. Corridor crossers cut passages.
-- **Room-to-corridor ratio: 30-50% rooms.** More corridors connecting fewer rooms beats large open spaces.
+- **Design 2-4 distinct rooms** connected by corridor crossers. NOT one big open floor.
 - **Zig-zag corridors ~50% of the time.** Creates better exploration flow.
 - **2-tile room separation.** Leave at least 2 Wall tiles between rooms to prevent the corner grid from merging them.
 - **Terrain names must match the tile catalog key.** Use short lowercase names (e.g., `"floor"` not `"floor (interior)"`). Use `defaultTerrain` from `list_tilesets` as reference.

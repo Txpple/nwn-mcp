@@ -98,10 +98,10 @@ export function buildCornerGrid(
     const c = getRotatedCorners(tile, f.orientation);
 
     const corners: Array<[number, number, string]> = [
-      [f.x,     f.y,     c.bottomLeft],
-      [f.x + 1, f.y,     c.bottomRight],
-      [f.x,     f.y + 1, c.topLeft],
-      [f.x + 1, f.y + 1, c.topRight],
+      [f.x,     f.y,     c.bottomLeft.toLowerCase()],
+      [f.x + 1, f.y,     c.bottomRight.toLowerCase()],
+      [f.x,     f.y + 1, c.topLeft.toLowerCase()],
+      [f.x + 1, f.y + 1, c.topRight.toLowerCase()],
     ];
     for (const [cx, cy, terrain] of corners) {
       if (cx >= 0 && cx < cw && cy >= 0 && cy < ch) {
@@ -253,21 +253,88 @@ export function solveArea(
 
   const cornerGrid = buildCornerGrid(width, height, lcDefault, lcZones, features, tileset);
   const crosserGrid = buildCrosserGrid(width, height, lcCrossers);
+
+  // Collect only terrains that actually appear in the corner grid.
+  // fallbackSubstitute must never inject terrains outside this set.
+  const allowedTerrains = new Set<string>();
+  for (const t of cornerGrid) allowedTerrains.add(t);
+
   const cw = width + 1;
   const cornerAt = (cx: number, cy: number) => cornerGrid[cy * cw + cx];
 
-  // Trim crossers from border/transition tiles.  A tile whose corner grid
-  // includes the default terrain (cliff, wall, etc.) is at the area's edge.
-  // Crossers should NOT extend into these tiles — they need proper end-cap
-  // tiles one row/column earlier.  Strip every crosser edge from such tiles
-  // and clean up the matching edge on their neighbors.
+  // ── Pre-solve adjacency validation ──────────────────────────────────
+  // Build the set of valid terrain pairs from the tileset's flat, non-group
+  // tiles.  Two terrains can be adjacent only if some tile has both in its
+  // corners.  If the corner grid contains an adjacent pair not in this set,
+  // the zone layout is invalid and will produce broken tiles.
+  const validPairs = new Set<string>();
+  for (const tile of tileset.tiles) {
+    if (tile.groupId !== null || !tile.flat) continue;
+    const c = [tile.corners.topLeft.toLowerCase(), tile.corners.topRight.toLowerCase(),
+               tile.corners.bottomLeft.toLowerCase(), tile.corners.bottomRight.toLowerCase()];
+    for (let i = 0; i < c.length; i++) {
+      for (let j = i + 1; j < c.length; j++) {
+        if (c[i] !== c[j]) {
+          validPairs.add(`${c[i]}|${c[j]}`);
+          validPairs.add(`${c[j]}|${c[i]}`);
+        }
+      }
+    }
+  }
+
+  // Check every adjacent corner pair in the grid for compatibility
+  const adjacencyErrors: Array<{ x: number; y: number; message: string }> = [];
+  const reportedPairs = new Set<string>();
+  for (let cy = 0; cy < height + 1; cy++) {
+    for (let cx = 0; cx < cw; cx++) {
+      const t = cornerAt(cx, cy);
+      // Check right neighbor
+      if (cx + 1 < cw) {
+        const r = cornerAt(cx + 1, cy);
+        if (t !== r && !validPairs.has(`${t}|${r}`)) {
+          const pairKey = `${t}|${r}`;
+          if (!reportedPairs.has(pairKey)) {
+            reportedPairs.add(pairKey);
+            adjacencyErrors.push({ x: cx, y: cy,
+              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${r}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.` });
+          }
+        }
+      }
+      // Check top neighbor
+      if (cy + 1 < height + 1) {
+        const u = cornerAt(cx, cy + 1);
+        if (t !== u && !validPairs.has(`${t}|${u}`)) {
+          const pairKey = `${t}|${u}`;
+          if (!reportedPairs.has(pairKey)) {
+            reportedPairs.add(pairKey);
+            adjacencyErrors.push({ x: cx, y: cy,
+              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${u}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.` });
+          }
+        }
+      }
+    }
+  }
+
+  if (adjacencyErrors.length > 0) {
+    // Return early with ONLY the adjacency errors — do not solve.
+    // This forces the caller to fix the zone layout before proceeding.
+    return { placements: [], warnings: adjacencyErrors };
+  }
+
+  // Trim crossers from terrain-boundary tiles.  A tile that mixes default
+  // terrain with non-default terrain is at a zone edge — crossers should NOT
+  // extend into these tiles because they need proper end-cap tiles one
+  // row/column earlier.  Tiles that are uniformly default terrain keep their
+  // crossers (they're valid crosser hosts, not boundaries).
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const bl = cornerAt(x, y);
       const br = cornerAt(x + 1, y);
       const tl = cornerAt(x, y + 1);
       const tr = cornerAt(x + 1, y + 1);
-      if (bl === lcDefault || br === lcDefault || tl === lcDefault || tr === lcDefault) {
+      const hasDefault = bl === lcDefault || br === lcDefault || tl === lcDefault || tr === lcDefault;
+      const allDefault = bl === lcDefault && br === lcDefault && tl === lcDefault && tr === lcDefault;
+      if (hasDefault && !allDefault) {
         const idx = y * width + x;
         const e = crosserGrid[idx];
         // Clear neighbor's matching edge before clearing ours
@@ -324,7 +391,7 @@ export function solveArea(
             }
             // If still no match, try substituting corners with crossers
             if (!placement) {
-              placement = fallbackSubstitute(wantCorners, wantCrossers, lcDefault, tileset);
+              placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
               if (placement) {
                 warnings.push({ x, y, message: `Substituted corners to preserve crossers (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
               }
@@ -375,7 +442,7 @@ export function solveArea(
                 for (const edge of activeEdges) {
                   const partial: CrosserEdges = { top: "", right: "", bottom: "", left: "" };
                   partial[edge] = wantCrossers[edge];
-                  placement = fallbackSubstitute(wantCorners, partial, lcDefault, tileset);
+                  placement = fallbackSubstitute(wantCorners, partial, allowedTerrains, tileset);
                   if (placement) {
                     warnings.push({ x, y, message: `Substituted corners + partial crossers (kept ${edge})` });
                     break;
@@ -383,7 +450,7 @@ export function solveArea(
                 }
               }
               if (!placement) {
-                placement = fallbackSubstitute(wantCorners, wantCrossers, lcDefault, tileset);
+                placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
                 if (placement) {
                   warnings.push({ x, y, message: `Substituted corners to preserve crossers (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
                 }
@@ -395,10 +462,10 @@ export function solveArea(
 
       if (!placement) {
         // Fallback 3: try substituting corners without crossers
-        placement = fallbackSubstitute(wantCorners, wantCrossers, lcDefault, tileset);
+        placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
         if (!placement) {
           const noCrossers = { top: "", right: "", bottom: "", left: "" };
-          placement = fallbackSubstitute(wantCorners, noCrossers, lcDefault, tileset);
+          placement = fallbackSubstitute(wantCorners, noCrossers, allowedTerrains, tileset);
         }
         if (placement) {
           warnings.push({ x, y, message: `Corner combo not in tileset; substituted corners (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
@@ -413,7 +480,7 @@ export function solveArea(
           tileset,
         );
         if (placement) {
-          warnings.push({ x, y, message: `Fell back to default terrain (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
+          warnings.push({ x, y, message: `No compatible transition tile using zone-defined terrains; fell back to default terrain '${lcDefault}' (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
         }
       }
 
@@ -442,18 +509,14 @@ export function solveArea(
 function fallbackSubstitute(
   corners: { tl: string; tr: string; bl: string; br: string },
   crossers: CrosserEdges,
-  defaultTerrain: string,
+  allowedTerrains: Set<string>,
   tileset: TilesetInfo,
 ): TilePlacement | null {
   const keys: Array<"tl" | "tr" | "bl" | "br"> = ["tl", "tr", "bl", "br"];
 
-  // Collect unique terrains to try: default first, then each terrain present
-  // in the corners (e.g., at a Pit/Floor boundary, also try substituting to Pit)
-  const terrainsToTry = [defaultTerrain];
-  const cornerValues = new Set([corners.tl, corners.tr, corners.bl, corners.br]);
-  for (const t of cornerValues) {
-    if (t !== defaultTerrain) terrainsToTry.push(t);
-  }
+  // Only try terrains that appear in the corner grid (zone-defined + default).
+  // Never inject a terrain that wasn't requested in the zone definitions.
+  const terrainsToTry = [...allowedTerrains];
 
   for (const subTerrain of terrainsToTry) {
     // Try substituting 1 corner

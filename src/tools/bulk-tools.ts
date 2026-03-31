@@ -7,7 +7,7 @@ import { getFieldStr, getFieldNum, getFieldLocStr, getFieldList } from "../types
 import type { GffObj } from "../types/gff.js";
 import { getGitDoc, writeBackGit, updateAreaCounts } from "../util/git-helpers.js";
 import { snapshotGitForUndo } from "../util/undo.js";
-import { checkPlacementWalkable } from "../util/walkmesh.js";
+import { checkPlacementWalkable, checkPositionWalkable } from "../util/walkmesh.js";
 import { buildResmanOptions } from "../module-loader.js";
 import fs from "fs/promises";
 
@@ -136,7 +136,7 @@ export function registerBulkTools(server: McpServer): void {
     "Remove objects matching a tag pattern from one or all areas. Use '*' as wildcard. Default: dry run (preview only).",
     {
       tagPattern: z.string().describe("Tag pattern. Use '*' as wildcard (e.g. 'goblin_*')"),
-      listName: z.string().describe("GIT list name: 'Creature List', 'Placeable List', 'WaypointList', 'Door List', 'Trigger List', 'Encounter List', 'SoundList', 'StoreList'"),
+      listName: z.string().describe("GIT list name: 'Creature List', 'Placeable List', 'WaypointList', 'Door List', 'TriggerList', 'Encounter List', 'SoundList', 'StoreList'"),
       area: z.string().optional().describe("Area resref. Omit for all areas."),
       dryRun: z.boolean().optional().default(true).describe("Preview mode (default: true)"),
     },
@@ -301,6 +301,79 @@ export function registerBulkTools(server: McpServer): void {
             tag,
             movedCount: matched.length,
             offset: { x: dx, y: dy, z: dz },
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ─── fix_object_heights ─────────────────────────────────────────────────
+
+  server.tool(
+    "fix_object_heights",
+    "Adjust Z height of all placed objects in an area to match the walkmesh ground plane. Fixes objects that were placed at Z=0 on elevated terrain.",
+    {
+      area: z.string().optional().describe("Area resref. Omit to fix all areas."),
+    },
+    async ({ area }) => {
+      const index = requireIndex();
+      const resmanOpts = await buildResmanOptions(index);
+
+      const areas = area
+        ? [area.toLowerCase()]
+        : [...index.areas.keys()];
+
+      // Object lists and their position field names
+      const objectLists: Array<{ listName: string; xField: string; yField: string; zField: string }> = [
+        { listName: "Creature List", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+        { listName: "Placeable List", xField: "X", yField: "Y", zField: "Z" },
+        { listName: "WaypointList", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+        { listName: "TriggerList", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+        { listName: "Encounter List", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+        { listName: "StoreList", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+        { listName: "SoundList", xField: "XPosition", yField: "YPosition", zField: "ZPosition" },
+      ];
+
+      let totalFixed = 0;
+      const results: Array<{ area: string; fixed: number }> = [];
+
+      for (const areaResref of areas) {
+        const { doc: gitDoc, obj: git } = getGitDoc(index, areaResref);
+        let areaFixed = 0;
+
+        for (const { listName, xField, yField, zField } of objectLists) {
+          const list = getFieldList(git, listName);
+          for (const obj of list) {
+            const wx = getFieldNum(obj, xField);
+            const wy = getFieldNum(obj, yField);
+            if (wx === 0 && wy === 0) continue; // skip unpositioned objects
+
+            const result = await checkPositionWalkable(wx, wy, areaResref, index, resmanOpts);
+            if (result.z !== undefined) {
+              const oldZ = getFieldNum(obj, zField);
+              if (Math.abs(oldZ - result.z) > 0.01) {
+                (obj as Record<string, unknown>)[zField] = { type: "float", value: result.z };
+                areaFixed++;
+              }
+            }
+          }
+        }
+
+        if (areaFixed > 0) {
+          snapshotGitForUndo(gitDoc, areaResref, "fix_object_heights", `Fixed ${areaFixed} object heights`);
+          await writeBackGit(index, areaResref, gitDoc);
+          totalFixed += areaFixed;
+          results.push({ area: areaResref, fixed: areaFixed });
+        }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            totalFixed,
+            areas: results,
           }, null, 2),
         }],
       };

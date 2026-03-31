@@ -507,7 +507,7 @@ export function registerBlueprintTools(server: McpServer): void {
       detectDC: optNumParam("Trap detection DC (default 15)"),
       disarmDC: optNumParam("Trap disarm DC (default 15)"),
       oneShot: z.boolean().optional().describe("Trap fires once then disables (default true)"),
-      size: optNumParam("Trigger square size in meters (default 3.0)"),
+      size: optNumParam("Trigger square size in meters (default 4.0)"),
     },
     async ({ resref, tag, name, scriptOnEnter, sourceResref, detectDC, disarmDC, oneShot, size }) => {
       const index = requireIndex();
@@ -515,7 +515,7 @@ export function registerBlueprintTools(server: McpServer): void {
       const detectN = detectDC !== undefined ? toI(detectDC) : 15;
       const disarmN = disarmDC !== undefined ? toI(disarmDC) : 15;
       const oneShotN = oneShot !== false;
-      const sizeN = size !== undefined ? parseFloat(size) : 3.0;
+      const sizeN = size !== undefined ? parseFloat(size) : 4.0;
       const halfSize = sizeN / 2;
 
       let doc: GffDocument;

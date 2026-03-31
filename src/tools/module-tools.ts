@@ -170,7 +170,7 @@ function buildStarterArea(): { are: GffDocument; git: GffDocument; gic: GffDocum
     "Placeable List": { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },
-    "Trigger List": { type: "list", value: [] },
+    "TriggerList": { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
     List: { type: "list", value: [] },
     AreaProperties: {
@@ -197,7 +197,7 @@ function buildStarterArea(): { are: GffDocument; git: GffDocument; gic: GffDocum
     "Placeable List": { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },
-    "Trigger List": { type: "list", value: [] },
+    "TriggerList": { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
   };
 

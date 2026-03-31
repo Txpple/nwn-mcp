@@ -116,10 +116,11 @@ export function registerPlacementTools(server: McpServer): void {
       delete obj.__data_type;
       obj.__struct_id = GIT_STRUCT_ID.CREATURE;
 
-      // Set position
+      // Set position — use walkmesh Z height for accurate ground placement
+      const placeZ = walkCheck.z ?? zN;
       obj.XPosition = { type: "float", value: xN };
       obj.YPosition = { type: "float", value: yN };
-      obj.ZPosition = { type: "float", value: zN };
+      obj.ZPosition = { type: "float", value: placeZ };
 
       // Set facing
       const rad = degToRad(bearingN);
@@ -230,10 +231,11 @@ export function registerPlacementTools(server: McpServer): void {
         setField(obj, "HasInventory", "byte", 0);
       }
 
-      // Placeables use different position field names
+      // Placeables use different position field names — use walkmesh Z
+      const placeZ = walkCheck.z ?? zN;
       obj.X = { type: "float", value: xN };
       obj.Y = { type: "float", value: yN };
-      obj.Z = { type: "float", value: zN };
+      obj.Z = { type: "float", value: placeZ };
       obj.Bearing = { type: "float", value: degToRad(bearingN) };
 
       // Verify Appearance is present from blueprint
@@ -332,7 +334,7 @@ export function registerPlacementTools(server: McpServer): void {
         TemplateResRef: { type: "resref", value: "" },
         XPosition: { type: "float", value: xN },
         YPosition: { type: "float", value: yN },
-        ZPosition: { type: "float", value: zN },
+        ZPosition: { type: "float", value: walkCheck.z ?? zN },
         XOrientation: { type: "float", value: Math.sin(rad) },
         YOrientation: { type: "float", value: Math.cos(rad) },
       };
@@ -393,7 +395,7 @@ export function registerPlacementTools(server: McpServer): void {
 
       obj.X = { type: "float", value: xN };
       obj.Y = { type: "float", value: yN };
-      obj.Z = { type: "float", value: zN };
+      obj.Z = { type: "float", value: walkResult.z ?? zN };
       obj.Bearing = { type: "float", value: degToRad(bearingN) };
 
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
@@ -467,11 +469,26 @@ export function registerPlacementTools(server: McpServer): void {
 
       obj.XPosition = { type: "float", value: xN };
       obj.YPosition = { type: "float", value: yN };
-      obj.ZPosition = { type: "float", value: zN };
+      obj.ZPosition = { type: "float", value: walkCheck.z ?? zN };
+
+      // Ensure trigger has geometry — blueprints don't include it, but placed
+      // instances require it for the engine to detect entry and the toolset to render.
+      if (!obj.Geometry) {
+        const s = 2.0; // half-size of default 4m square
+        obj.Geometry = {
+          type: "list",
+          value: [
+            { __struct_id: 0, PointX: { type: "float", value: -s }, PointY: { type: "float", value: -s }, PointZ: { type: "float", value: 0.025 } },
+            { __struct_id: 0, PointX: { type: "float", value:  s }, PointY: { type: "float", value: -s }, PointZ: { type: "float", value: 0.025 } },
+            { __struct_id: 0, PointX: { type: "float", value:  s }, PointY: { type: "float", value:  s }, PointZ: { type: "float", value: 0.025 } },
+            { __struct_id: 0, PointX: { type: "float", value: -s }, PointY: { type: "float", value:  s }, PointZ: { type: "float", value: 0.025 } },
+          ],
+        };
+      }
 
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
       snapshotGitForUndo(gitDoc, area, "place_trigger", `Place trigger ${blueprint}`);
-      const triggerList = getFieldList(git, "Trigger List");
+      const triggerList = getFieldList(git, "TriggerList");
       triggerList.push(obj);
 
       await writeBackGit(index, area, gitDoc);
@@ -537,7 +554,22 @@ export function registerPlacementTools(server: McpServer): void {
 
       obj.XPosition = { type: "float", value: xN };
       obj.YPosition = { type: "float", value: yN };
-      obj.ZPosition = { type: "float", value: zN };
+      obj.ZPosition = { type: "float", value: walkCheck.z ?? zN };
+
+      // Ensure encounter has geometry — blueprints don't include it, but placed
+      // instances require it for the engine to define the spawn region.
+      if (!obj.Geometry) {
+        const s = 5.0; // half-size of default 10m square
+        obj.Geometry = {
+          type: "list",
+          value: [
+            { __struct_id: 0, X: { type: "float", value: -s }, Y: { type: "float", value: -s }, Z: { type: "float", value: 0.0 } },
+            { __struct_id: 0, X: { type: "float", value:  s }, Y: { type: "float", value: -s }, Z: { type: "float", value: 0.0 } },
+            { __struct_id: 0, X: { type: "float", value:  s }, Y: { type: "float", value:  s }, Z: { type: "float", value: 0.0 } },
+            { __struct_id: 0, X: { type: "float", value: -s }, Y: { type: "float", value:  s }, Z: { type: "float", value: 0.0 } },
+          ],
+        };
+      }
 
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
       snapshotGitForUndo(gitDoc, area, "place_encounter", `Place encounter ${blueprint}`);
@@ -595,7 +627,7 @@ export function registerPlacementTools(server: McpServer): void {
 
       obj.XPosition = { type: "float", value: xN };
       obj.YPosition = { type: "float", value: yN };
-      obj.ZPosition = { type: "float", value: zN };
+      obj.ZPosition = { type: "float", value: walkResult.z ?? zN };
 
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
       snapshotGitForUndo(gitDoc, area, "place_sound", `Place sound ${blueprint}`);
@@ -666,7 +698,7 @@ export function registerPlacementTools(server: McpServer): void {
 
       obj.XPosition = { type: "float", value: xN };
       obj.YPosition = { type: "float", value: yN };
-      obj.ZPosition = { type: "float", value: zN };
+      obj.ZPosition = { type: "float", value: walkCheck.z ?? zN };
 
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
       snapshotGitForUndo(gitDoc, area, "place_store", `Place store ${blueprint}`);

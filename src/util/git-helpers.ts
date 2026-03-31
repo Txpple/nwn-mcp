@@ -71,6 +71,45 @@ export async function writeBackGit(index: ModuleIndex, areaResref: string, doc: 
     await jsonToGff(doc, entry.filePath);
     invalidateTagToAreaCache();
   }
+  // Sync the GIC file so the toolset can see all placed objects.
+  await syncGic(index, areaResref, doc);
+}
+
+/**
+ * Sync the GIC (Game Instance Comments) file to match the GIT.
+ * The toolset uses the GIC to know which objects exist in an area.
+ * Each GIC list must have one entry per GIT object (just a Comment struct).
+ */
+async function syncGic(index: ModuleIndex, areaResref: string, gitDoc: GffDocument): Promise<void> {
+  const gicKey = `${areaResref.toLowerCase()}.gic`;
+  const gicEntry = index.resources.get(gicKey);
+  if (!gicEntry) return;
+
+  const gicDoc = index.parsedGff.get(gicKey);
+  if (!gicDoc) return;
+
+  const gic = gicDoc as GffObj;
+  const git = gitDoc as GffObj;
+
+  const listNames = [
+    "Creature List", "Door List", "Encounter List",
+    "Placeable List", "SoundList", "StoreList",
+    "TriggerList", "WaypointList",
+  ];
+
+  for (const listName of listNames) {
+    const gitList = getFieldList(git, listName);
+    const gicList: GffObj[] = [];
+    for (let i = 0; i < gitList.length; i++) {
+      gicList.push({
+        __struct_id: 0,
+        Comment: { type: "cexostring", value: "" },
+      });
+    }
+    gic[listName] = { type: "list", value: gicList };
+  }
+
+  await jsonToGff(gicDoc, gicEntry.filePath);
 }
 
 /** Update area summary counts from the current GIT. */
@@ -82,7 +121,7 @@ export function updateAreaCounts(index: ModuleIndex, areaResref: string): void {
   summary.placeableCount = getFieldList(obj, "Placeable List").length;
   summary.doorCount = getFieldList(obj, "Door List").length;
   summary.encounterCount = getFieldList(obj, "Encounter List").length;
-  summary.triggerCount = getFieldList(obj, "Trigger List").length;
+  summary.triggerCount = getFieldList(obj, "TriggerList").length;
   summary.waypointCount = getFieldList(obj, "WaypointList").length;
 }
 

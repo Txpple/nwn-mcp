@@ -32,6 +32,8 @@ export interface WalkabilityResult {
   material?: string;
   materialId?: number;
   error?: string;
+  /** Z height of the walkmesh surface at the tested position */
+  z?: number;
 }
 
 export interface TileWalkSummary {
@@ -256,6 +258,21 @@ export function pointInTriangle2D(
   return a >= -1e-6 && b >= -1e-6 && c >= -1e-6;
 }
 
+/** Interpolate Z height at a 2D point inside a triangle using barycentric coords */
+export function interpolateZ(
+  px: number, py: number,
+  v1: [number, number, number],
+  v2: [number, number, number],
+  v3: [number, number, number],
+): number {
+  const denom = (v2[1] - v3[1]) * (v1[0] - v3[0]) + (v3[0] - v2[0]) * (v1[1] - v3[1]);
+  if (Math.abs(denom) < 1e-10) return v1[2];
+  const a = ((v2[1] - v3[1]) * (px - v3[0]) + (v3[0] - v2[0]) * (py - v3[1])) / denom;
+  const b = ((v3[1] - v1[1]) * (px - v3[0]) + (v1[0] - v3[0]) * (py - v3[1])) / denom;
+  const c = 1 - a - b;
+  return a * v1[2] + b * v2[2] + c * v3[2];
+}
+
 /**
  * Apply inverse tile orientation rotation to convert world-local coords
  * to the tile's unrotated local space.
@@ -338,8 +355,13 @@ export async function checkPositionWalkable(
   // Apply inverse rotation
   const [rx, ry] = rotateForOrientation(localX, localY, tileOrientation);
 
-  // Test against all faces
+  // Test against all faces — collect ALL hits and prefer the walkable face
+  // with the highest Z (handles overlapping faces at different heights,
+  // e.g., a non-walkable ground plane at Z=0 under a walkable surface at Z=0.5)
   const surfacemat = index.twodaTables.get("surfacemat");
+
+  let bestWalkable: WalkabilityResult | null = null;
+  let bestNonWalkable: WalkabilityResult | null = null;
 
   for (const face of wok.faces) {
     const v1 = wok.verts[face.v1];
@@ -349,13 +371,28 @@ export async function checkPositionWalkable(
 
     if (pointInTriangle2D(rx, ry, v1[0], v1[1], v2[0], v2[1], v3[0], v3[1])) {
       const walkable = isMaterialWalkable(face.surfaceMaterial, surfacemat);
-      return {
+      const zHeight = interpolateZ(rx, ry, v1, v2, v3);
+      const result: WalkabilityResult = {
         walkable,
         material: getMaterialName(face.surfaceMaterial, surfacemat),
         materialId: face.surfaceMaterial,
+        z: zHeight,
       };
+      if (walkable) {
+        if (!bestWalkable || zHeight > (bestWalkable.z ?? -Infinity)) {
+          bestWalkable = result;
+        }
+      } else {
+        if (!bestNonWalkable || zHeight > (bestNonWalkable.z ?? -Infinity)) {
+          bestNonWalkable = result;
+        }
+      }
     }
   }
+
+  // Prefer walkable face, fall back to non-walkable
+  if (bestWalkable) return bestWalkable;
+  if (bestNonWalkable) return bestNonWalkable;
 
   return { walkable: false, error: "Position is not covered by any walkmesh face" };
 }
@@ -386,7 +423,7 @@ export async function checkPlacementWalkable(
   areaResref: string,
   index: ModuleIndex,
   resmanOpts: ResmanOptions,
-): Promise<{ ok: boolean; reason?: string }> {
+): Promise<{ ok: boolean; reason?: string; z?: number }> {
   // 1. Check the position itself
   const center = await checkPositionWalkable(worldX, worldY, areaResref, index, resmanOpts);
   if (!center.walkable) {
@@ -403,7 +440,7 @@ export async function checkPlacementWalkable(
     }
   }
 
-  return { ok: true };
+  return { ok: true, z: center.z };
 }
 
 // ─── Tile Walk Summary ──────────────────────────────────────────────────────

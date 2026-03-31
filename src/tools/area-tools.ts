@@ -72,7 +72,7 @@ export function registerAreaTools(server: McpServer): void {
           creatures: getFieldList(git, "Creature List").length,
           placeables: getFieldList(git, "Placeable List").length,
           doors: getFieldList(git, "Door List").length,
-          triggers: getFieldList(git, "Trigger List").length,
+          triggers: getFieldList(git, "TriggerList").length,
           encounters: getFieldList(git, "Encounter List").length,
           waypoints: getFieldList(git, "WaypointList").length,
           sounds: getFieldList(git, "SoundList").length,
