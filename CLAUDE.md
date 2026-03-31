@@ -140,6 +140,14 @@ All placement and movement tools **block** if the target position is non-walkabl
 
 **Excluded:** `place_door` (doors sit at tile boundaries near walls), `place_sound` (audio sources don't need walkable positions), movement of Door List and SoundList objects.
 
+## Walkmesh Caching
+
+The `wok_cache/` directory is lazy-initialized on first use via `ensureWokCacheDir()` in `walkmesh.ts`. Reset on each `load_module` via `setWokCacheDir(tempDir)`. All walkmesh consumers (placement tools, paint tools) call `ensureWokCacheDir()` — never create the dir manually.
+
+## Object Height Correction
+
+`fix_object_heights` adjusts Z height of all placed objects in an area (or all areas) to match the walkmesh ground plane. Iterates creatures, placeables, waypoints, triggers, encounters, stores, and sounds. Only adjusts objects where the walkmesh Z differs from the current Z by more than 0.01. The walkmesh check uses the highest walkable face at each position (handles overlapping faces at different heights).
+
 ## Zone-Based Terrain Solver
 
 `paint_terrain` takes terrain zones + crosser paths and re-solves ALL non-feature tiles via a corner grid approach (`src/util/zone-solver.ts`). Feature tiles (from `paint_feature`) are preserved automatically. `paint_tiles` is for exact tileId manual overrides only.
