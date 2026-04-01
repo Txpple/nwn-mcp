@@ -95,6 +95,27 @@ All three interior styles use the same BSP + corridor pipeline, differentiated b
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
 - **Solver fallback priority for uniform corners** (all-floor room tiles): drop crossers first (preserve floor), then try corner substitution. For mixed corners (wall-floor boundaries): try corner substitution to preserve crossers first, then drop.
 
+#### Exterior Styles (forest / rural / city / plains / desert / castle / tundra)
+
+All seven exterior styles use the same clearing distribution + road network pipeline, differentiated by `ExteriorStyleConfig` presets:
+
+- **`forest`** — Clearings in dense woodland. Cliff/trees border, winding roads, 50% stream crosser, 30% feature density.
+- **`rural`** — Farmland/village. Trees border, spine roads, 40% stream, 60% feature density. Best for ttr01, tts01, ttz01.
+- **`city`** — Urban exterior. Building/wall border, grid roads, 20% water, 80% feature density. Best for tcn01, tcm02.
+- **`plains`** — Open terrain. Cliff/mountain border, spine roads, 30% stream, 40% feature density. Best for trm02, trs02.
+- **`desert`** — Arid regions. Cliff border, spine roads, no stream, 30% feature density. Best for ttd01.
+- **`castle`** — Fortified exterior. Castlewall border, spine roads, 20% stream, 50% feature density. Best for tno01.
+- **`tundra`** — Frozen terrain. Trees border, spine roads, 15% water, 30% feature density. Best for tts02, tti01.
+
+#### Exterior Layout Rules
+
+- **Clearing distribution**: Grid-based with randomized sizes (per-clearing variation) and position jitter within cells.
+- **Perimeter border**: Impassable terrain (cliff, trees, building) on all edge tiles.
+- **Secondary terrain**: Per-clearing probability of adjacent 2x2 terrain patches (water, rocky).
+- **Road styles**: `spine` (sequential), `grid` (city Manhattan network), `winding` (S-curve paths).
+- **Secondary crossers**: Probability-based stream/river network connecting first and last clearings.
+- **Feature suggestions**: `suggestedFeatures` array in LayoutResult — pre-validated feature placements centered in clearings, filtered by fit (group.columns <= room.w, group.rows <= room.h), no overlap with crossers or perimeter.
+
 ### Resource Loading
 
 On `load_module`, the server builds a full resman stack (lowest to highest priority):

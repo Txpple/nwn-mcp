@@ -19,13 +19,12 @@ import { computeValidPairs } from "./zone-solver.js";
 // ─── Public interface ────────────────────────────────────────────────────────
 
 export interface LayoutStyle {
-  type: "dungeon" | "cave" | "dwelling" | "forest_clearing" | "village";
+  type: "dungeon" | "cave" | "dwelling"
+      | "forest" | "rural" | "city" | "plains" | "desert" | "castle" | "tundra";
   rooms?: number;          // dungeon/cave/dwelling: number of rooms (default 3)
-  clearings?: number;      // forest_clearing: number of clearings (default 3)
-  buildings?: number;      // village: number of buildings (default 4)
+  clearings?: number;      // exterior: number of clearings (default from preset)
   corridorStyle?: "straight" | "zigzag";  // dungeon: corridor style (default "straight")
-  hasWater?: boolean;      // forest_clearing: include a water zone
-  hasRoad?: boolean;       // village: include a road crosser spine
+  roadStyle?: "spine" | "grid" | "winding";  // exterior: road network style
 }
 
 export interface TransitionPoint {
@@ -36,10 +35,20 @@ export interface TransitionPoint {
   tileRow: number;
 }
 
+export interface SuggestedFeature {
+  feature: string;       // group name from tileset
+  x: number;             // grid column (bottom-left)
+  y: number;             // grid row (bottom-left)
+  columns: number;       // width in tiles
+  rows: number;          // height in tiles
+  clearingIndex: number; // which clearing/room this belongs to
+}
+
 export interface LayoutResult {
   zones: TerrainZone[];
   crossers: CrosserPath[];
   transitionPoints: TransitionPoint[];
+  suggestedFeatures: SuggestedFeature[];
   layoutDescription: string;
 }
 
@@ -78,6 +87,116 @@ const INTERIOR_PRESETS: Record<string, InteriorStyleConfig> = {
   },
 };
 
+// ─── Exterior style configuration ───────────────────────────────────────────
+
+interface ExteriorStyleConfig {
+  borderKeywords: string[];          // search order for border terrain
+  clearingKeywords: string[];        // search order for clearing terrain
+  secondaryKeywords: string[];       // optional extra terrain (water, rocky)
+  secondaryChance: number;           // per-clearing probability of secondary zone
+  clearingSizeRange: [number, number]; // [min, max] clearing size in tiles
+  clearingCountDefault: number;      // default clearing count
+  roadStyle: "spine" | "grid" | "winding";
+  roadKeywords: string[];            // primary crosser search
+  secondaryCrosserKeywords: string[];// e.g. ["stream"] for water crossers
+  secondaryCrosserChance: number;    // probability of secondary crosser network
+  featureDensity: number;            // fraction of clearings getting feature suggestions
+}
+
+const EXTERIOR_PRESETS: Record<string, ExteriorStyleConfig> = {
+  forest: {
+    borderKeywords: ["cliff", "trees", "rocky", "mountain"],
+    clearingKeywords: ["grass", "dirt", "clearing", "floor"],
+    secondaryKeywords: ["water", "pond", "lake"],
+    secondaryChance: 0.4,
+    clearingSizeRange: [3, 5],
+    clearingCountDefault: 3,
+    roadStyle: "winding",
+    roadKeywords: ["road", "path", "trail"],
+    secondaryCrosserKeywords: ["stream", "river"],
+    secondaryCrosserChance: 0.5,
+    featureDensity: 0.3,
+  },
+  rural: {
+    borderKeywords: ["trees", "cliff", "rocky", "mountain"],
+    clearingKeywords: ["grass", "snow", "sand", "dirt", "clearing"],
+    secondaryKeywords: ["water", "pond"],
+    secondaryChance: 0.3,
+    clearingSizeRange: [3, 5],
+    clearingCountDefault: 4,
+    roadStyle: "spine",
+    roadKeywords: ["road", "path", "trail", "street"],
+    secondaryCrosserKeywords: ["stream", "river"],
+    secondaryCrosserChance: 0.4,
+    featureDensity: 0.6,
+  },
+  city: {
+    borderKeywords: ["building", "castle", "wall", "trees"],
+    clearingKeywords: ["cobble", "stone", "floor", "grass"],
+    secondaryKeywords: ["water"],
+    secondaryChance: 0.2,
+    clearingSizeRange: [3, 5],
+    clearingCountDefault: 5,
+    roadStyle: "grid",
+    roadKeywords: ["road", "street", "path"],
+    secondaryCrosserKeywords: ["stream", "dock"],
+    secondaryCrosserChance: 0.2,
+    featureDensity: 0.8,
+  },
+  plains: {
+    borderKeywords: ["cliff", "mountain", "rocky", "trees"],
+    clearingKeywords: ["grass", "sand", "dirt"],
+    secondaryKeywords: ["water", "chasm"],
+    secondaryChance: 0.3,
+    clearingSizeRange: [3, 5],
+    clearingCountDefault: 3,
+    roadStyle: "spine",
+    roadKeywords: ["road", "path", "trail", "ridge"],
+    secondaryCrosserKeywords: ["stream", "river"],
+    secondaryCrosserChance: 0.3,
+    featureDensity: 0.4,
+  },
+  desert: {
+    borderKeywords: ["cliff", "rocky", "mountain"],
+    clearingKeywords: ["desert", "sand", "dirt"],
+    secondaryKeywords: ["water", "oasis"],
+    secondaryChance: 0.2,
+    clearingSizeRange: [3, 4],
+    clearingCountDefault: 3,
+    roadStyle: "spine",
+    roadKeywords: ["road", "trench", "path"],
+    secondaryCrosserKeywords: [],
+    secondaryCrosserChance: 0,
+    featureDensity: 0.3,
+  },
+  castle: {
+    borderKeywords: ["castlewall", "cliff", "wall", "trees"],
+    clearingKeywords: ["grass", "dirt", "cobble"],
+    secondaryKeywords: ["water"],
+    secondaryChance: 0.2,
+    clearingSizeRange: [3, 5],
+    clearingCountDefault: 3,
+    roadStyle: "spine",
+    roadKeywords: ["road", "path", "lists"],
+    secondaryCrosserKeywords: ["river", "stream"],
+    secondaryCrosserChance: 0.2,
+    featureDensity: 0.5,
+  },
+  tundra: {
+    borderKeywords: ["trees", "cliff", "rocky", "mountain"],
+    clearingKeywords: ["snow", "camp", "dirt", "floor"],
+    secondaryKeywords: ["water"],
+    secondaryChance: 0.15,
+    clearingSizeRange: [3, 4],
+    clearingCountDefault: 3,
+    roadStyle: "spine",
+    roadKeywords: ["road", "path", "trail"],
+    secondaryCrosserKeywords: ["stream"],
+    secondaryCrosserChance: 0.2,
+    featureDensity: 0.3,
+  },
+};
+
 // ─── Main entry point ────────────────────────────────────────────────────────
 
 export function generateLayout(
@@ -95,10 +214,14 @@ export function generateLayout(
     case "cave":
     case "dwelling":
       return generateInteriorLayout(tileset, width, height, style, validPairs, transitionCount, transitionDirections);
-    case "forest_clearing":
-      return generateExteriorClearingLayout(tileset, width, height, style, validPairs, transitionCount, transitionDirections);
-    case "village":
-      return generateVillageLayout(tileset, width, height, style, validPairs, transitionCount, transitionDirections);
+    case "forest":
+    case "rural":
+    case "city":
+    case "plains":
+    case "desert":
+    case "castle":
+    case "tundra":
+      return generateExteriorLayout(tileset, width, height, style, validPairs, transitionCount, transitionDirections);
     default:
       return generateInteriorLayout(tileset, width, height, style, validPairs, transitionCount, transitionDirections);
   }
@@ -122,7 +245,7 @@ function generateInteriorLayout(
   // Find the floor terrain — first terrain that isn't the default (wall)
   const floorTerrain = findFloorTerrain(tileset, defaultTerrain, validPairs);
   if (!floorTerrain) {
-    return { zones: [], crossers: [], transitionPoints: [], layoutDescription: "ERROR: Cannot find a floor terrain that transitions from the default wall terrain." };
+    return { zones: [], crossers: [], transitionPoints: [], suggestedFeatures: [], layoutDescription: "ERROR: Cannot find a floor terrain that transitions from the default wall terrain." };
   }
 
   // Find a corridor crosser type.  Doorway crossers require matched pairs on
@@ -207,12 +330,12 @@ function generateInteriorLayout(
   const corridorDescs = crossers.map((c, i) => `Corridor ${i + 1}: ${c.type}`);
   const layoutDescription = `${roomCount}-room ${style.type}: ${roomDescs.join(", ")}. ${corridorDescs.join(", ")}.`;
 
-  return { zones, crossers, transitionPoints, layoutDescription };
+  return { zones, crossers, transitionPoints, suggestedFeatures: [], layoutDescription };
 }
 
-// ─── Exterior clearing layout ────────────────────────────────────────────────
+// ─── Exterior layout (all outdoor styles) ────────────────────────────────────
 
-function generateExteriorClearingLayout(
+function generateExteriorLayout(
   tileset: TilesetInfo,
   width: number,
   height: number,
@@ -221,33 +344,26 @@ function generateExteriorClearingLayout(
   transitionCount?: number,
   transitionDirections?: string[],
 ): LayoutResult {
-  const clearingCount = style.clearings ?? 3;
+  const config = EXTERIOR_PRESETS[style.type] ?? EXTERIOR_PRESETS.forest;
   const defaultTerrain = tileset.defaultTerrain.toLowerCase();
+  const clearingCount = style.clearings ?? config.clearingCountDefault;
+  const roadStyleOverride = style.roadStyle ?? config.roadStyle;
 
-  // For exterior tilesets, check if the default terrain IS the walkable one.
-  // If so (e.g., ttf01 where "forest" is walkable), clearings use the default
-  // terrain and variety comes from features, not terrain zones.
+  // Resolve terrains from config keywords
   const clearingTerrain = findClearingTerrain(tileset, defaultTerrain, validPairs);
   const useDefaultForClearings = !clearingTerrain || clearingTerrain === defaultTerrain;
+  const borderTerrain = findBorderTerrain(tileset, defaultTerrain, validPairs, config.borderKeywords);
+  const roadCrosser = findCrosserType(tileset, config.roadKeywords);
 
-  // Find a path crosser (road, stream)
-  const roadCrosser = findCrosserType(tileset, ["road", "path", "trail", "stream"]);
+  // Distribute clearings with randomized sizes
+  const playableX = 1, playableY = 1;
+  const playableW = width - 2, playableH = height - 2;
+  const rooms = distributeRooms(playableX, playableY, playableW, playableH,
+    clearingCount, config.clearingSizeRange);
 
-  // Place clearings in a grid pattern within the playable area
-  const playableX = 1;
-  const playableY = 1;
-  const playableW = width - 2;
-  const playableH = height - 2;
-
-  const rooms = distributeRooms(playableX, playableY, playableW, playableH, clearingCount, 3, 4);
-
-  // Build terrain zones
   const zones: TerrainZone[] = [];
 
-  // Perimeter always needs an impassable border for exterior areas.
-  // Find a suitable border terrain (cliff, rocky, mountain, etc.)
-  const borderTerrain = findBorderTerrain(tileset, defaultTerrain, validPairs);
-
+  // Perimeter border
   if (borderTerrain) {
     const borderTiles: Array<{ x: number; y: number }> = [];
     for (let x = 0; x < width; x++) {
@@ -260,11 +376,8 @@ function generateExteriorClearingLayout(
     zones.push({ terrain: borderTerrain, tiles: borderTiles });
   }
 
-  if (useDefaultForClearings) {
-    // Clearings use default terrain — no additional zones needed.
-    // The "clearings" are logical regions for object/feature placement.
-  } else {
-    // Clearing zones with the walkable terrain
+  if (!useDefaultForClearings) {
+    // Clearing zones
     for (const room of rooms) {
       const tiles: Array<{ x: number; y: number }> = [];
       for (let x = room.x; x < room.x + room.w; x++) {
@@ -275,114 +388,65 @@ function generateExteriorClearingLayout(
       zones.push({ terrain: clearingTerrain, tiles });
     }
 
-    // Optional water zone
-    if (style.hasWater) {
-      const waterTerrain = findTerrainByName(tileset, ["water", "lake", "pond"]);
-      if (waterTerrain && canAdjoin(waterTerrain, clearingTerrain, validPairs)) {
-        const lastRoom = rooms[rooms.length - 1];
-        const waterTiles: Array<{ x: number; y: number }> = [];
-        for (let x = lastRoom.x + lastRoom.w; x < Math.min(lastRoom.x + lastRoom.w + 2, width - 1); x++) {
-          for (let y = lastRoom.y; y < lastRoom.y + Math.min(2, lastRoom.h); y++) {
-            waterTiles.push({ x, y });
-          }
+    // Secondary terrain patches (water, rocky) — per-clearing probability
+    const secondaryTerrain = findTerrainByName(tileset, config.secondaryKeywords);
+    const adjTarget = clearingTerrain ?? defaultTerrain;
+    if (secondaryTerrain && canAdjoin(secondaryTerrain, adjTarget, validPairs)) {
+      for (const room of rooms) {
+        if (Math.random() >= config.secondaryChance) continue;
+        // Place 2x2 patch adjacent to one edge of the clearing
+        const side = Math.floor(Math.random() * 4); // 0=right, 1=top, 2=left, 3=bottom
+        let sx: number, sy: number, sw = 2, sh = 2;
+        switch (side) {
+          case 0: sx = room.x + room.w; sy = room.y; break;
+          case 1: sx = room.x; sy = room.y + room.h; break;
+          case 2: sx = room.x - 2; sy = room.y; break;
+          default: sx = room.x; sy = room.y - 2; break;
         }
-        if (waterTiles.length > 0) {
-          zones.push({ terrain: waterTerrain, tiles: waterTiles });
+        // Clamp to playable area (avoid perimeter)
+        sx = Math.max(1, Math.min(sx, width - 3));
+        sy = Math.max(1, Math.min(sy, height - 3));
+        sw = Math.min(sw, width - 1 - sx);
+        sh = Math.min(sh, height - 1 - sy);
+        if (sw >= 1 && sh >= 1) {
+          const tiles: Array<{ x: number; y: number }> = [];
+          for (let x = sx; x < sx + sw; x++) {
+            for (let y = sy; y < sy + sh; y++) {
+              tiles.push({ x, y });
+            }
+          }
+          zones.push({ terrain: secondaryTerrain, tiles });
         }
       }
     }
   }
 
-  // Connect clearings with road crossers (through any tile for exteriors)
+  // Road network
   const crossers: CrosserPath[] = [];
   if (roadCrosser) {
-    for (let i = 0; i < rooms.length - 1; i++) {
-      const corridor = connectRoomsExterior(rooms[i], rooms[i + 1], roadCrosser);
-      if (corridor) crossers.push(corridor);
+    buildRoadNetwork(rooms, roadCrosser, roadStyleOverride, crossers);
+  }
+
+  // Secondary crosser network (stream/river)
+  if (config.secondaryCrosserKeywords.length > 0 && Math.random() < config.secondaryCrosserChance) {
+    const streamCrosser = findCrosserType(tileset, config.secondaryCrosserKeywords);
+    if (streamCrosser && streamCrosser !== roadCrosser && rooms.length >= 2) {
+      const stream = connectRoomsExteriorWinding(rooms[0], rooms[rooms.length - 1], streamCrosser, 2);
+      if (stream) crossers.push(stream);
     }
   }
 
+  // Feature suggestions
+  const suggestedFeatures = suggestFeatures(rooms, tileset, config, crossers, width, height);
+
   const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections);
 
-  const terrainNote = useDefaultForClearings
-    ? " Default terrain used throughout (clearings are logical regions for features/objects)."
-    : "";
   const roomDescs = rooms.map((r, i) => `Clearing ${i + 1} (${r.w}x${r.h} at col=${r.x},row=${r.y})`);
-  const layoutDescription = `${clearingCount}-clearing exterior: ${roomDescs.join(", ")}.${terrainNote}${style.hasWater ? " Water feature included." : ""}`;
+  const crosserDescs = crossers.length > 0 ? ` ${crossers.length} crosser paths.` : "";
+  const featureDescs = suggestedFeatures.length > 0 ? ` ${suggestedFeatures.length} feature suggestions.` : "";
+  const layoutDescription = `${clearingCount}-clearing ${style.type}: ${roomDescs.join(", ")}.${crosserDescs}${featureDescs}`;
 
-  return { zones, crossers, transitionPoints, layoutDescription };
-}
-
-// ─── Village layout ──────────────────────────────────────────────────────────
-
-function generateVillageLayout(
-  tileset: TilesetInfo,
-  width: number,
-  height: number,
-  style: LayoutStyle,
-  validPairs: Set<string>,
-  transitionCount?: number,
-  transitionDirections?: string[],
-): LayoutResult {
-  const buildingCount = style.buildings ?? 4;
-  const defaultTerrain = tileset.defaultTerrain.toLowerCase();
-
-  const clearingTerrain = findClearingTerrain(tileset, defaultTerrain, validPairs);
-  const useDefaultForBuildings = !clearingTerrain || clearingTerrain === defaultTerrain;
-
-  const roadCrosser = findCrosserType(tileset, ["road", "path", "trail"]);
-
-  const playableX = 1;
-  const playableY = 1;
-  const playableW = width - 2;
-  const playableH = height - 2;
-
-  // Place buildings as small clearings along a road spine
-  const rooms = distributeRooms(playableX, playableY, playableW, playableH, buildingCount, 2, 3);
-
-  const zones: TerrainZone[] = [];
-
-  // Perimeter border for exterior areas
-  const villageBorderTerrain = findBorderTerrain(tileset, defaultTerrain, validPairs);
-  if (villageBorderTerrain) {
-    const borderTiles: Array<{ x: number; y: number }> = [];
-    for (let x = 0; x < width; x++) {
-      for (let y = 0; y < height; y++) {
-        if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
-          borderTiles.push({ x, y });
-        }
-      }
-    }
-    zones.push({ terrain: villageBorderTerrain, tiles: borderTiles });
-  }
-
-  if (!useDefaultForBuildings) {
-    // Building clearings
-    for (const room of rooms) {
-      const tiles: Array<{ x: number; y: number }> = [];
-      for (let x = room.x; x < room.x + room.w; x++) {
-        for (let y = room.y; y < room.y + room.h; y++) {
-          tiles.push({ x, y });
-        }
-      }
-      zones.push({ terrain: clearingTerrain, tiles });
-    }
-  }
-
-  // Road spine connecting buildings
-  const crossers: CrosserPath[] = [];
-  if (style.hasRoad !== false && roadCrosser) {
-    for (let i = 0; i < rooms.length - 1; i++) {
-      const corridor = connectRoomsExterior(rooms[i], rooms[i + 1], roadCrosser);
-      if (corridor) crossers.push(corridor);
-    }
-  }
-
-  const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections);
-
-  const layoutDescription = `${buildingCount}-building village: ${rooms.map((r, i) => `Building ${i + 1} (${r.w}x${r.h} at col=${r.x},row=${r.y})`).join(", ")}.${roadCrosser ? " Road spine connecting buildings." : ""}`;
-
-  return { zones, crossers, transitionPoints, layoutDescription };
+  return { zones, crossers, transitionPoints, suggestedFeatures, layoutDescription };
 }
 
 // ─── BSP partitioning ────────────────────────────────────────────────────────
@@ -451,11 +515,11 @@ function bspPartition(x: number, y: number, w: number, h: number,
 
 function distributeRooms(
   playX: number, playY: number, playW: number, playH: number,
-  count: number, minSize: number, maxSize: number,
+  count: number, sizeRange: [number, number],
 ): Room[] {
   const rooms: Room[] = [];
+  const [minSize, maxSize] = sizeRange;
 
-  // Grid-based distribution with some randomness
   const cols = Math.ceil(Math.sqrt(count));
   const rows = Math.ceil(count / cols);
   const cellW = Math.floor(playW / cols);
@@ -467,15 +531,17 @@ function distributeRooms(
       const cellX = playX + c * cellW;
       const cellY = playY + r * cellH;
 
-      // Room size: between minSize and maxSize, capped by cell
-      const roomW = Math.min(maxSize, Math.max(minSize, cellW - 2));
-      const roomH = Math.min(maxSize, Math.max(minSize, cellH - 2));
+      // Randomize size within range, capped by cell
+      const roomW = Math.min(Math.max(minSize, cellW - 2), minSize + Math.floor(Math.random() * (maxSize - minSize + 1)));
+      const roomH = Math.min(Math.max(minSize, cellH - 2), minSize + Math.floor(Math.random() * (maxSize - minSize + 1)));
 
-      // Center room in cell
-      const roomX = cellX + Math.floor((cellW - roomW) / 2);
-      const roomY = cellY + Math.floor((cellH - roomH) / 2);
+      // Random offset within cell (jitter, not always centered)
+      const slackW = Math.max(0, cellW - roomW);
+      const slackH = Math.max(0, cellH - roomH);
+      const offsetX = slackW > 0 ? Math.floor(Math.random() * slackW) : 0;
+      const offsetY = slackH > 0 ? Math.floor(Math.random() * slackH) : 0;
 
-      rooms.push({ x: roomX, y: roomY, w: roomW, h: roomH, name: String.fromCharCode(65 + placed) });
+      rooms.push({ x: cellX + offsetX, y: cellY + offsetY, w: roomW, h: roomH, name: String.fromCharCode(65 + placed) });
       placed++;
     }
   }
@@ -709,6 +775,170 @@ function connectRoomsInterior(
   return { type: crosserType, path };
 }
 
+// ─── Road network builder ────────────────────────────────────────────────────
+
+function buildRoadNetwork(rooms: Room[], crosserType: string, roadStyle: string, crossers: CrosserPath[]): void {
+  if (rooms.length < 2) return;
+
+  if (roadStyle === "grid") {
+    // City grid: connect horizontal and vertical neighbors
+    const sorted = [...rooms].sort((a, b) => a.y !== b.y ? a.y - b.y : a.x - b.x);
+    const connected = new Set<string>();
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const key = `${i},${j}`;
+        if (connected.has(key)) continue;
+        const a = sorted[i], b = sorted[j];
+        // Connect if they're adjacent in the grid (share axis overlap)
+        const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (xOverlap > 0 || yOverlap > 0) {
+          const path = connectRoomsExterior(a, b, crosserType);
+          if (path) { crossers.push(path); connected.add(key); }
+        }
+      }
+    }
+    // Ensure all rooms connected: fallback to sequential
+    if (connected.size < rooms.length - 1) {
+      for (let i = 0; i < rooms.length - 1; i++) {
+        const path = connectRoomsExterior(rooms[i], rooms[i + 1], crosserType);
+        if (path) crossers.push(path);
+      }
+    }
+  } else if (roadStyle === "winding") {
+    // Forest winding: sequential connections with S-curves
+    for (let i = 0; i < rooms.length - 1; i++) {
+      const path = connectRoomsExteriorWinding(rooms[i], rooms[i + 1], crosserType, 1);
+      if (path) crossers.push(path);
+    }
+  } else {
+    // Spine: sequential straight connections
+    for (let i = 0; i < rooms.length - 1; i++) {
+      const path = connectRoomsExterior(rooms[i], rooms[i + 1], crosserType);
+      if (path) crossers.push(path);
+    }
+  }
+}
+
+// ─── Exterior winding connector ─────────────────────────────────────────────
+
+function connectRoomsExteriorWinding(a: Room, b: Room, crosserType: string, curvature: number): CrosserPath | null {
+  const aCx = a.x + Math.floor(a.w / 2), aCy = a.y + Math.floor(a.h / 2);
+  const bCx = b.x + Math.floor(b.w / 2), bCy = b.y + Math.floor(b.h / 2);
+  const path: CrosserPath["path"] = [];
+  const dx = Math.abs(bCx - aCx), dy = Math.abs(bCy - aCy);
+
+  if (dx >= dy) {
+    // Horizontal with vertical S-curve offset in middle third
+    const startX = Math.min(aCx, bCx), endX = Math.max(aCx, bCx);
+    const y = aCx < bCx ? aCy : bCy;
+    const span = endX - startX + 1;
+    const offsetDir = Math.random() < 0.5 ? curvature : -curvature;
+    const bendStart = startX + Math.max(1, Math.floor(span / 3));
+    const bendEnd = startX + Math.min(span - 2, Math.floor(2 * span / 3));
+    for (let x = startX; x <= endX; x++) {
+      const inBend = bendStart < bendEnd && x > bendStart && x < bendEnd;
+      const curY = inBend ? y + offsetDir : y;
+      const prevY = (x > startX && bendStart < bendEnd && x - 1 > bendStart && x - 1 < bendEnd) ? y + offsetDir : y;
+      const nextY = (x < endX && bendStart < bendEnd && x + 1 > bendStart && x + 1 < bendEnd) ? y + offsetDir : y;
+      if (x === bendStart && bendStart < bendEnd) {
+        path.push({ x, y, edges: { left: x > startX, bottom: offsetDir < 0, top: offsetDir > 0 } });
+        path.push({ x, y: y + offsetDir, edges: { right: true, bottom: offsetDir > 0, top: offsetDir < 0 } });
+      } else if (x === bendEnd && bendStart < bendEnd) {
+        path.push({ x, y: y + offsetDir, edges: { left: true, bottom: offsetDir > 0, top: offsetDir < 0 } });
+        path.push({ x, y, edges: { right: x < endX, bottom: offsetDir < 0, top: offsetDir > 0 } });
+      } else if (inBend) {
+        path.push({ x, y: curY, edges: { left: true, right: true } });
+      } else {
+        path.push({ x, y, edges: { left: x > startX, right: x < endX } });
+      }
+    }
+  } else {
+    // Vertical with horizontal S-curve offset
+    const startY = Math.min(aCy, bCy), endY = Math.max(aCy, bCy);
+    const x = aCy < bCy ? aCx : bCx;
+    const span = endY - startY + 1;
+    const offsetDir = Math.random() < 0.5 ? curvature : -curvature;
+    const bendStart = startY + Math.max(1, Math.floor(span / 3));
+    const bendEnd = startY + Math.min(span - 2, Math.floor(2 * span / 3));
+    for (let y = startY; y <= endY; y++) {
+      const inBend = bendStart < bendEnd && y > bendStart && y < bendEnd;
+      if (y === bendStart && bendStart < bendEnd) {
+        path.push({ x, y, edges: { bottom: y > startY, left: offsetDir < 0, right: offsetDir > 0 } });
+        path.push({ x: x + offsetDir, y, edges: { top: true, left: offsetDir > 0, right: offsetDir < 0 } });
+      } else if (y === bendEnd && bendStart < bendEnd) {
+        path.push({ x: x + offsetDir, y, edges: { bottom: true, left: offsetDir > 0, right: offsetDir < 0 } });
+        path.push({ x, y, edges: { top: y < endY, left: offsetDir < 0, right: offsetDir > 0 } });
+      } else if (inBend) {
+        path.push({ x: x + offsetDir, y, edges: { bottom: true, top: true } });
+      } else {
+        path.push({ x, y, edges: { bottom: y > startY, top: y < endY } });
+      }
+    }
+  }
+
+  return { type: crosserType, path };
+}
+
+// ─── Feature placement suggestions ──────────────────────────────────────────
+
+function suggestFeatures(
+  rooms: Room[], tileset: TilesetInfo, config: ExteriorStyleConfig,
+  crossers: CrosserPath[], areaWidth: number, areaHeight: number,
+): SuggestedFeature[] {
+  const suggestions: SuggestedFeature[] = [];
+  const occupied = new Set<string>();
+
+  // Mark crosser tiles as occupied
+  for (const c of crossers) {
+    for (const p of c.path) occupied.add(`${p.x},${p.y}`);
+  }
+
+  for (let i = 0; i < rooms.length; i++) {
+    if (Math.random() >= config.featureDensity) continue;
+    const room = rooms[i];
+
+    // Filter groups that fit within this clearing
+    const candidates = tileset.groups.filter(g =>
+      g.columns <= room.w && g.rows <= room.h &&
+      g.tileIds.some(id => id >= 0)
+    );
+    if (candidates.length === 0) continue;
+
+    // Prefer larger groups for visual impact
+    candidates.sort((a, b) => (b.columns * b.rows) - (a.columns * a.rows));
+    const pick = candidates[Math.floor(Math.random() * Math.min(3, candidates.length))];
+
+    // Center feature in clearing
+    const fx = room.x + Math.floor((room.w - pick.columns) / 2);
+    const fy = room.y + Math.floor((room.h - pick.rows) / 2);
+
+    // Validate: within bounds, not on perimeter, no overlap with occupied tiles
+    if (fx < 1 || fy < 1 || fx + pick.columns > areaWidth - 1 || fy + pick.rows > areaHeight - 1) continue;
+    let overlap = false;
+    for (let gx = fx; gx < fx + pick.columns && !overlap; gx++) {
+      for (let gy = fy; gy < fy + pick.rows && !overlap; gy++) {
+        if (occupied.has(`${gx},${gy}`)) overlap = true;
+      }
+    }
+    if (overlap) continue;
+
+    // Mark tiles as occupied
+    for (let gx = fx; gx < fx + pick.columns; gx++) {
+      for (let gy = fy; gy < fy + pick.rows; gy++) {
+        occupied.add(`${gx},${gy}`);
+      }
+    }
+
+    suggestions.push({
+      feature: pick.name, x: fx, y: fy,
+      columns: pick.columns, rows: pick.rows, clearingIndex: i,
+    });
+  }
+
+  return suggestions;
+}
+
 // ─── Room connection (exterior — through any tile) ───────────────────────────
 
 function connectRoomsExterior(a: Room, b: Room, crosserType: string | null): CrosserPath | null {
@@ -873,17 +1103,20 @@ function findCrosserType(tileset: TilesetInfo, keywords: string[]): string | nul
   return tileset.crosserTypes.length > 0 ? tileset.crosserTypes[0].name.toLowerCase() : null;
 }
 
-/** Find an impassable border terrain for exterior area perimeters */
-function findBorderTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>): string | null {
-  const candidates = ["cliff", "rocky", "mountain", "wall"];
+/** Find a border terrain for exterior area perimeters.
+ *  Accepts keyword list to search for style-appropriate borders (trees, building, cliff, etc.)
+ *  Falls back to any non-default terrain that can adjoin the default. */
+function findBorderTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>, keywords?: string[]): string | null {
+  const candidates = keywords ?? ["cliff", "rocky", "mountain", "wall", "trees", "building"];
   for (const name of candidates) {
     const terrain = tileset.terrainTypes.find(t => t.rawName.includes(name));
     if (terrain && terrain.rawName !== defaultTerrain && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
       return terrain.rawName;
     }
   }
+  // Fallback: any non-default terrain that adjoins default
   for (const terrain of tileset.terrainTypes) {
-    if (terrain.rawName !== defaultTerrain && IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+    if (terrain.rawName !== defaultTerrain && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
       return terrain.rawName;
     }
   }

@@ -203,7 +203,7 @@ Just describe the kind of adventure you want to play and your party size and lev
 
 Tools specific to the `/create-adventure` pipeline for autonomous module building:
 
-- `generate_area_layout` — procedural area layout generation (dungeon, cave, dwelling, forest, village styles)
+- `generate_area_layout` — procedural area layout generation with feature suggestions (dungeon, cave, dwelling, forest, rural, city, plains, desert, castle, tundra)
 - `find_walkable_position` — find guaranteed walkable coordinates in an area region
 - `create_adventure_transition` — one-way portal transitions (blue light + VFX + dialog)
 
