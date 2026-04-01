@@ -33,6 +33,10 @@ export interface TilesetInfo {
 export interface TerrainType {
   index: number;
   name: string;
+  /** Original .set file terrain name (lowercase). Matches tile corner values and validPairs keys.
+   *  `name` may be overwritten by TLK resolution (e.g. "floor" → "Floor (Interior)"),
+   *  but rawName always stays as the .set value so layout/solver code can match against it. */
+  rawName: string;
   strref: number;
 }
 
@@ -116,9 +120,11 @@ export function parseTilesetFile(content: string, resref: string): TilesetInfo {
   const terrainTypes: TerrainType[] = [];
   for (let i = 0; i < terrainCount; i++) {
     const s = sections.get(`TERRAIN${i}`) ?? {};
+    const rawName = (s.Name ?? `Terrain${i}`).toLowerCase();
     terrainTypes.push({
       index: i,
-      name: (s.Name ?? `Terrain${i}`).toLowerCase(),
+      name: rawName,
+      rawName,
       strref: parseInt(s.StrRef ?? "0", 10),
     });
   }

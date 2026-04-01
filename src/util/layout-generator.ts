@@ -525,23 +525,33 @@ function connectRoomsInterior(
     const xMax = Math.max(x0, x1);
     const span = xMax - xMin + 1;
 
-    // S-curve: offset middle segment by 1 tile vertically when long enough
-    if (corridorStyle !== "zigzag" && span >= 5 && Math.random() < 0.5) {
+    // S-curve: offset middle segment by 1 tile vertically.
+    // Bend positions are computed within the WALL segment only (xMin and xMax
+    // are room floor tiles) to avoid placing L-bend crossers on boundary tiles
+    // adjacent to rooms — those require impossible corner+crosser combos.
+    const wallStartX = xMin + 1;
+    const wallEndX = xMax - 1;
+    const wallSpanX = wallEndX - wallStartX + 1;
+    if (corridorStyle !== "zigzag" && wallSpanX >= 4 && Math.random() < 0.5) {
       const offsetDir = Math.random() < 0.5 ? 1 : -1;
-      const bendStart = xMin + Math.floor(span / 3);
-      const bendEnd = xMin + Math.floor(2 * span / 3);
-      for (let x = xMin; x <= xMax; x++) {
-        if (x === bendStart) {
-          fullPath.push({ x, y: sharedY });
-          fullPath.push({ x, y: sharedY + offsetDir });
-        } else if (x > bendStart && x < bendEnd) {
-          fullPath.push({ x, y: sharedY + offsetDir });
-        } else if (x === bendEnd) {
-          fullPath.push({ x, y: sharedY + offsetDir });
-          fullPath.push({ x, y: sharedY });
-        } else {
-          fullPath.push({ x, y: sharedY });
+      const bendStart = wallStartX + Math.max(1, Math.floor(wallSpanX / 3));
+      const bendEnd = wallStartX + Math.min(wallSpanX - 2, Math.floor(2 * wallSpanX / 3));
+      if (bendStart < bendEnd) {
+        for (let x = xMin; x <= xMax; x++) {
+          if (x === bendStart) {
+            fullPath.push({ x, y: sharedY });
+            fullPath.push({ x, y: sharedY + offsetDir });
+          } else if (x > bendStart && x < bendEnd) {
+            fullPath.push({ x, y: sharedY + offsetDir });
+          } else if (x === bendEnd) {
+            fullPath.push({ x, y: sharedY + offsetDir });
+            fullPath.push({ x, y: sharedY });
+          } else {
+            fullPath.push({ x, y: sharedY });
+          }
         }
+      } else {
+        for (let x = xMin; x <= xMax; x++) fullPath.push({ x, y: sharedY });
       }
     } else {
       for (let x = xMin; x <= xMax; x++) fullPath.push({ x, y: sharedY });
@@ -555,23 +565,31 @@ function connectRoomsInterior(
     const yMax = Math.max(y0, y1);
     const span = yMax - yMin + 1;
 
-    // S-curve: offset middle segment by 1 tile horizontally when long enough
-    if (corridorStyle !== "zigzag" && span >= 5 && Math.random() < 0.5) {
+    // S-curve: offset middle segment by 1 tile horizontally.
+    // Same boundary-avoidance as horizontal — see comment above.
+    const wallStartY = yMin + 1;
+    const wallEndY = yMax - 1;
+    const wallSpanY = wallEndY - wallStartY + 1;
+    if (corridorStyle !== "zigzag" && wallSpanY >= 4 && Math.random() < 0.5) {
       const offsetDir = Math.random() < 0.5 ? 1 : -1;
-      const bendStart = yMin + Math.floor(span / 3);
-      const bendEnd = yMin + Math.floor(2 * span / 3);
-      for (let y = yMin; y <= yMax; y++) {
-        if (y === bendStart) {
-          fullPath.push({ x: sharedX, y });
-          fullPath.push({ x: sharedX + offsetDir, y });
-        } else if (y > bendStart && y < bendEnd) {
-          fullPath.push({ x: sharedX + offsetDir, y });
-        } else if (y === bendEnd) {
-          fullPath.push({ x: sharedX + offsetDir, y });
-          fullPath.push({ x: sharedX, y });
-        } else {
-          fullPath.push({ x: sharedX, y });
+      const bendStart = wallStartY + Math.max(1, Math.floor(wallSpanY / 3));
+      const bendEnd = wallStartY + Math.min(wallSpanY - 2, Math.floor(2 * wallSpanY / 3));
+      if (bendStart < bendEnd) {
+        for (let y = yMin; y <= yMax; y++) {
+          if (y === bendStart) {
+            fullPath.push({ x: sharedX, y });
+            fullPath.push({ x: sharedX + offsetDir, y });
+          } else if (y > bendStart && y < bendEnd) {
+            fullPath.push({ x: sharedX + offsetDir, y });
+          } else if (y === bendEnd) {
+            fullPath.push({ x: sharedX + offsetDir, y });
+            fullPath.push({ x: sharedX, y });
+          } else {
+            fullPath.push({ x: sharedX, y });
+          }
         }
+      } else {
+        for (let y = yMin; y <= yMax; y++) fullPath.push({ x: sharedX, y });
       }
     } else {
       for (let y = yMin; y <= yMax; y++) fullPath.push({ x: sharedX, y });
@@ -739,19 +757,23 @@ function computeTransitions(
 // ─── Tileset terrain helpers ─────────────────────────────────────────────────
 
 function findFloorTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>): string | null {
-  // Look for common floor terrain names that can transition from the default
+  // Use rawName for matching — it preserves the original .set terrain name which
+  // matches tile corner values and validPairs keys.  The display `name` may differ
+  // after TLK resolution (e.g. "floor" → "Floor (Interior)").
+  // NOTE: Corridor-only tilesets (e.g. Beholder Caves tib01) have a single terrain
+  // type and use feature groups for rooms — zone-based layout generation cannot
+  // support them.
   const candidates = ["floor", "stone", "dirt", "sand", "grass", "wood"];
   for (const name of candidates) {
-    const terrain = tileset.terrainTypes.find(t => t.name.toLowerCase().includes(name));
-    if (terrain && canAdjoin(terrain.name.toLowerCase(), defaultTerrain, validPairs)) {
-      return terrain.name.toLowerCase();
+    const terrain = tileset.terrainTypes.find(t => t.rawName.includes(name));
+    if (terrain && !IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
-  // Fallback: any terrain that can transition from default
+  // Fallback: any non-impassable terrain that can transition from default
   for (const terrain of tileset.terrainTypes) {
-    const name = terrain.name.toLowerCase();
-    if (name !== defaultTerrain && canAdjoin(name, defaultTerrain, validPairs)) {
-      return name;
+    if (terrain.rawName !== defaultTerrain && !IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
   return null;
@@ -763,15 +785,14 @@ const IMPASSABLE_TERRAINS = new Set(["cliff", "pit", "chasm", "wall", "lava", "w
 function findClearingTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>): string | null {
   const candidates = ["grass", "dirt", "sand", "clearing", "floor", "stone"];
   for (const name of candidates) {
-    const terrain = tileset.terrainTypes.find(t => t.name.toLowerCase().includes(name));
-    if (terrain && !IMPASSABLE_TERRAINS.has(terrain.name.toLowerCase()) && canAdjoin(terrain.name.toLowerCase(), defaultTerrain, validPairs)) {
-      return terrain.name.toLowerCase();
+    const terrain = tileset.terrainTypes.find(t => t.rawName.includes(name));
+    if (terrain && !IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
   for (const terrain of tileset.terrainTypes) {
-    const name = terrain.name.toLowerCase();
-    if (name !== defaultTerrain && !IMPASSABLE_TERRAINS.has(name) && canAdjoin(name, defaultTerrain, validPairs)) {
-      return name;
+    if (terrain.rawName !== defaultTerrain && !IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
   return null;
@@ -779,8 +800,8 @@ function findClearingTerrain(tileset: TilesetInfo, defaultTerrain: string, valid
 
 function findTerrainByName(tileset: TilesetInfo, keywords: string[]): string | null {
   for (const kw of keywords) {
-    const terrain = tileset.terrainTypes.find(t => t.name.toLowerCase().includes(kw));
-    if (terrain) return terrain.name.toLowerCase();
+    const terrain = tileset.terrainTypes.find(t => t.rawName.includes(kw));
+    if (terrain) return terrain.rawName;
   }
   return null;
 }
@@ -790,25 +811,21 @@ function findCrosserType(tileset: TilesetInfo, keywords: string[]): string | nul
     const crosser = tileset.crosserTypes.find(c => c.name.toLowerCase().includes(kw));
     if (crosser) return crosser.name.toLowerCase();
   }
-  // Fallback: first available crosser
   return tileset.crosserTypes.length > 0 ? tileset.crosserTypes[0].name.toLowerCase() : null;
 }
 
 /** Find an impassable border terrain for exterior area perimeters */
 function findBorderTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>): string | null {
-  // Prefer cliff, rocky, mountain — anything impassable that transitions from the default
   const candidates = ["cliff", "rocky", "mountain", "wall"];
   for (const name of candidates) {
-    const terrain = tileset.terrainTypes.find(t => t.name.toLowerCase().includes(name));
-    if (terrain && terrain.name.toLowerCase() !== defaultTerrain && canAdjoin(terrain.name.toLowerCase(), defaultTerrain, validPairs)) {
-      return terrain.name.toLowerCase();
+    const terrain = tileset.terrainTypes.find(t => t.rawName.includes(name));
+    if (terrain && terrain.rawName !== defaultTerrain && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
-  // Fallback: any impassable terrain that transitions from default
   for (const terrain of tileset.terrainTypes) {
-    const name = terrain.name.toLowerCase();
-    if (name !== defaultTerrain && IMPASSABLE_TERRAINS.has(name) && canAdjoin(name, defaultTerrain, validPairs)) {
-      return name;
+    if (terrain.rawName !== defaultTerrain && IMPASSABLE_TERRAINS.has(terrain.rawName) && canAdjoin(terrain.rawName, defaultTerrain, validPairs)) {
+      return terrain.rawName;
     }
   }
   return null;
