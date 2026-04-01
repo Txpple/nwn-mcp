@@ -399,12 +399,12 @@ export function registerAdventureTools(server: McpServer): void {
 
   server.tool(
     "generate_area_layout",
-    "Generate a procedural area layout with terrain zones, crosser paths, and transition points. Returns data ready to pass to paint_terrain. Encodes all layout rules: perimeter encapsulation, room separation, adjacency validation, walkable ratio. Styles: dungeon (BSP rooms + corridors), cave (organic chambers), forest_clearing (exterior clearings separated by trees), village (buildings along a road).",
+    "Generate a procedural area layout with terrain zones, crosser paths, and transition points. Returns data ready to pass to paint_terrain. Encodes all layout rules: perimeter encapsulation, room separation, adjacency validation, walkable ratio. Styles: dungeon (varied rooms + corridors, some L-shapes), cave (smaller rooms, more corridors, maze-like), dwelling (quadrant rooms, fewer corridors, building interior), forest_clearing (exterior clearings separated by trees), village (buildings along a road).",
     {
       tileset: z.string().describe("Tileset resref (e.g., 'tdc01' for crypt, 'ttf01' for forest)"),
       width: z.string().describe("Area width in tiles (8-18)"),
       height: z.string().describe("Area height in tiles (8-18)"),
-      style: z.string().describe("JSON style object: {type: 'dungeon'|'cave'|'forest_clearing'|'village', rooms?: number, clearings?: number, buildings?: number, corridorStyle?: 'straight'|'zigzag', hasWater?: boolean, hasRoad?: boolean}"),
+      style: z.string().describe("JSON style object: {type: 'dungeon'|'cave'|'dwelling'|'forest_clearing'|'village', rooms?: number, clearings?: number, buildings?: number, corridorStyle?: 'straight'|'zigzag', hasWater?: boolean, hasRoad?: boolean}"),
       transitionCount: z.string().optional().describe("Number of transition points to generate (default 1)"),
       transitionDirections: z.string().optional().describe("JSON array of directions: ['south', 'north', 'east', 'west']"),
     },

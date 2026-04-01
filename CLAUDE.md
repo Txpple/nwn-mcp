@@ -73,16 +73,23 @@ All tools have **MCP annotations** (`readOnlyHint`, `destructiveHint`, `idempote
 
 ### Layout Generator
 
-`generate_area_layout` (in `src/util/layout-generator.ts`) is server-side procedural layout generation that encodes the area design rules from `adventure-areas/SKILL.md`. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road). Returns zones + crossers ready for `paint_terrain`, plus transition points.
+`generate_area_layout` (in `src/util/layout-generator.ts`) is server-side procedural layout generation that encodes the area design rules from `adventure-areas/SKILL.md`. Returns zones + crossers ready for `paint_terrain`, plus transition points. Uses `computeValidPairs()` from `src/util/zone-solver.ts` to validate terrain adjacency chains.
 
-Uses `computeValidPairs()` from `src/util/zone-solver.ts` to validate terrain adjacency chains.
+#### Interior Styles (dungeon / cave / dwelling)
 
-#### Interior Dungeon Layout Rules
+All three interior styles use the same BSP + corridor pipeline, differentiated by `InteriorStyleConfig` presets:
 
-- **BSP rooms**: minimum 3x3, margin=2 (4-tile wall gaps between rooms). Split threshold 10.
+- **`dungeon`** — Balanced variety. Moderate split variance (±15%), room sizes 60-100% of leaf, margin 2-3, 1 shortcut corridor, 50% S-curves, 30% L-shaped rooms.
+- **`cave`** — Maze-like. High variance (±20%), small rooms (40-70% of leaf), margin 2-4, 3 shortcut corridors, 70% S-curves, 10% L-shapes. More corridors than rooms.
+- **`dwelling`** — Building interior. Near-zero variance (±5%), rooms fill 85-100% of leaf, fixed margin 2, no shortcuts, 10% S-curves, no L-shapes. Clean quadrant layout.
+
+#### Interior Layout Rules
+
+- **BSP rooms**: minimum 3x3, margin >= 2 (4-tile wall gaps). Split threshold and variance controlled by style config. Room size is a random fraction of available leaf space, randomly offset within the leaf.
+- **L-shaped rooms**: Adjacent BSP siblings may merge into a single zone with probability `nonRectChance`. The zone solver handles arbitrary shapes.
 - **Corridor routing**: axis-overlap detection (straight connection at shared Y/X), L-bend fallback when rooms don't overlap on either axis.
-- **S-curves**: 50% chance on straight corridors ≥5 wall tiles. Offsets middle third by 1 tile perpendicular. Creates two bends.
-- **T-junctions**: after sequential room connections, one shortcut corridor between the closest non-adjacent room pair. Creates 3-way/4-way intersections where corridors cross.
+- **S-curves**: Probability controlled by `sCurveChance`. Offsets middle third by 1 tile perpendicular. Bends only on interior wall tiles (never first/last).
+- **Shortcut corridors**: `shortcutCount` controls how many T-junction shortcuts between non-adjacent rooms. Creates 3-way/4-way intersections where corridors cross.
 - **Corridor crossers stay on wall tiles only.** Never extend crosser paths into room floor tiles — this creates corridor arches inside rooms (wrong). Room boundary tiles are regular floor tiles resolved by the corner grid.
 - **Crosser type**: use `corridor` (self-contained per tile). Never use `doorway` — doorway crossers require matched pairs on shared edges (arch geometry split between adjacent tiles).
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
