@@ -15,7 +15,7 @@ import path from "path";
 import fs from "fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requireIndex, buildResmanOptions } from "../module-loader.js";
-import { jsonToGff } from "../nim-tools.js";
+import { jsonToGff, erfPack } from "../nim-tools.js";
 import { getTilesetInfo } from "../util/tileset.js";
 import { getRotatedCorners, getRotatedCrossers } from "../util/tileset.js";
 import { validateTilePlacement, findDefaultTile } from "../util/tile-solver.js";
@@ -254,6 +254,7 @@ export function registerPaintTools(server: McpServer): void {
     {
       area: z.string().describe("Area resref to delete"),
     },
+    { destructiveHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const areaResref = area.toLowerCase();
@@ -328,8 +329,11 @@ export function registerPaintTools(server: McpServer): void {
       area: z.string().describe("Area resref"),
       zones: z.string().describe("JSON array of terrain zones: [{terrain: 'Water', tiles: [{x:0,y:0}, ...]}, ...]. Later zones override earlier at shared boundaries."),
       crossers: z.string().optional().describe("JSON array of crosser paths: [{type: 'Stream', path: [{x:0,y:0, edges:{top:true,bottom:true}}, ...]}]. Each tile specifies which edges carry the crosser."),
+      autoRepack: z.string().optional().describe("If 'true', automatically repacks the module after painting. Saves progress to the .mod file."),
     },
-    async ({ area, zones: zonesJson, crossers: crossersJson }) => {
+    { idempotentHint: true },
+    async ({ area, zones: zonesJson, crossers: crossersJson, autoRepack: autoRepackStr }) => {
+      const shouldRepack = autoRepackStr?.toLowerCase() === "true";
       let zones: TerrainZone[];
       let crossers: CrosserPath[] = [];
       try {
@@ -435,6 +439,18 @@ export function registerPaintTools(server: McpServer): void {
         });
       }
 
+      // Auto-repack if requested — saves progress to .mod file
+      let repacked = false;
+      if (shouldRepack) {
+        try {
+          const modPath = index.modPath;
+          if (modPath) {
+            await erfPack(index.tempDir, modPath);
+            repacked = true;
+          }
+        } catch { /* non-fatal — painting succeeded even if repack fails */ }
+      }
+
       return {
         content: [{
           type: "text",
@@ -445,6 +461,7 @@ export function registerPaintTools(server: McpServer): void {
             featuresPreserved: features.length,
             warnings: result.warnings,
             placements: placementResults,
+            ...(shouldRepack ? { repacked } : {}),
           }, null, 2),
         }],
       };
@@ -462,6 +479,7 @@ export function registerPaintTools(server: McpServer): void {
       area: z.string().describe("Area resref"),
       tiles: z.string().describe("JSON array: [{x, y, tileId, orientation?}]"),
     },
+    { idempotentHint: true },
     async ({ area, tiles: tilesJson }) => {
       let tiles: Array<{ x: number; y: number; tileId: number; orientation?: number }>;
       try {
@@ -554,6 +572,7 @@ export function registerPaintTools(server: McpServer): void {
       x: z.string().describe("Bottom-left column of the feature (0-based)"),
       y: z.string().describe("Bottom-left row of the feature (0-based)"),
     },
+    { idempotentHint: true },
     async ({ area, feature, x: xStr, y: yStr }) => {
       const x = parseInt(xStr, 10);
       const y = parseInt(yStr, 10);
@@ -715,6 +734,7 @@ export function registerPaintTools(server: McpServer): void {
       ambientSndNight: z.string().optional().describe("Night ambient sound ID"),
       ambientSndNightVol: z.string().optional().describe("Night ambient volume (0-100)"),
     },
+    { idempotentHint: true },
     async (params) => {
       const index = requireIndex();
       const { area } = params;

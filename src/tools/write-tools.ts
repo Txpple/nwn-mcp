@@ -22,6 +22,7 @@ export function registerWriteTools(server: McpServer): void {
       value: z.unknown().describe("New value to set"),
       gffType: z.string().optional().describe("GFF type if creating a new field (e.g., 'dword', 'cexostring')"),
     },
+    { idempotentHint: true },
     async ({ resource, type, path: fieldPath, value, gffType }) => {
       const index = requireIndex();
       const key = `${resource.toLowerCase()}.${type.toLowerCase()}`;
@@ -66,6 +67,7 @@ export function registerWriteTools(server: McpServer): void {
     {
       outputPath: z.string().optional().describe("Output path for the .mod file. Defaults to original location."),
     },
+    { idempotentHint: true },
     async ({ outputPath }) => {
       const index = requireIndex();
       const outPath = outputPath ? path.resolve(outputPath) : index.modPath;
@@ -299,6 +301,7 @@ export function registerWriteTools(server: McpServer): void {
       type: z.string().describe("Resource extension (e.g., 'uti', 'nss', 'dlg')"),
       outputPath: z.string().describe("Absolute path to write the file to"),
     },
+    { idempotentHint: true },
     async ({ resref, type: resType, outputPath }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.${resType.toLowerCase()}`;

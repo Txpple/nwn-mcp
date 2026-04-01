@@ -23,13 +23,14 @@ import { registerTilesetTools } from "./tools/tileset-tools.js";
 import { registerFactionTools } from "./tools/faction-tools.js";
 import { registerUndoTools } from "./tools/undo-tools.js";
 import { registerWriteTools } from "./tools/write-tools.js";
+import { registerAdventureTools } from "./tools/adventure-tools.js";
 
 const server = new McpServer({
   name: "nwn-mcp",
   version: "1.0.0",
 });
 
-// Register all tool groups
+// ── Base tools: module reading, querying, analysis ──────────────────────
 registerCoreReadTools(server);
 registerAreaTools(server);
 registerCreatureTools(server);
@@ -37,22 +38,27 @@ registerItemTools(server);
 registerDialogTools(server);
 registerScriptTools(server);
 registerAnalysisTools(server);
-registerWriteTools(server);
 registerLookupTools(server);
 registerEncounterTools(server);
-registerBulkTools(server);
 registerResmanTools(server);
 registerTilesetTools(server);
+registerDatabaseTools(server);
+
+// ── Base tools: module writing, editing, placement ──────────────────────
+registerWriteTools(server);
 registerPaintTools(server);
 registerPlacementTools(server);
 registerObjectMgmtTools(server);
 registerBlueprintTools(server);
 registerJournalTools(server);
 registerDialogWriteTools(server);
-registerDatabaseTools(server);
 registerModuleTools(server);
 registerFactionTools(server);
+registerBulkTools(server);
 registerUndoTools(server);
+
+// ── Adventure creator tools ─────────────────────────────────────────────
+registerAdventureTools(server);
 
 // Start the server
 const transport = new StdioServerTransport();

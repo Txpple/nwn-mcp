@@ -100,7 +100,7 @@ Once connected, call `load_module` with a module filename to begin:
 load_module("mymodule.mod")
 ```
 
-Then use any of the 80+ tools to inspect and modify the module. Ask your AI assistant things like:
+Then use any of the 110+ tools to inspect and modify the module. Ask your AI assistant things like:
 
 - "Load my module and show me a summary"
 - "Create a forest area with a river running through it"
@@ -155,8 +155,9 @@ Just describe the kind of adventure you want to play and your party size and lev
 - `create_area` — create a new area with terrain tiles
 - `get_area_details` — area properties, lighting, weather, music
 - `set_area_properties` — modify lighting, fog, music, weather
-- `paint_terrain` — zone-based terrain painting with automatic tile solving
+- `paint_terrain` — zone-based terrain painting with automatic tile solving (supports `autoRepack` to save progress)
 - `paint_feature` — place multi-tile features (temples, lodges, etc.)
+- `get_tileset_details` — tileset info with summary mode (~2KB) or full tile catalog (~60-100KB)
 
 > **Note:** Terrain painting is best-effort — always open the module in the toolset to review painted areas and touch up as needed.
 - `visualize_area` — spatial JSON payload for AI reasoning
@@ -198,6 +199,14 @@ Just describe the kind of adventure you want to play and your party size and lev
 - `get_module_info` / `module_summary` — module metadata and overview
 - `undo_last_change` / `undo_history` — revert recent changes
 
+### Adventure Creator
+
+Tools specific to the `/create-adventure` pipeline for autonomous module building:
+
+- `generate_area_layout` — procedural area layout generation (dungeon, cave, forest, village styles)
+- `find_walkable_position` — find guaranteed walkable coordinates in an area region
+- `create_adventure_transition` — one-way portal transitions (blue light + VFX + dialog)
+
 ## Architecture
 
 ```
@@ -208,6 +217,8 @@ Just describe the kind of adventure you want to play and your party size and lev
 ```
 
 One module is loaded at a time. The server builds a full resource manager stack on load — base game BIFs, module HAKs, user overrides, and module resources — giving tools access to the complete data hierarchy.
+
+All tools carry [MCP annotations](https://spec.modelcontextprotocol.io/specification/2025-03-26/server/tools/#annotations) (`readOnlyHint`, `destructiveHint`, `idempotentHint`) so clients can understand tool behavior. Adventure-creator-specific tools are separated into `src/tools/adventure-tools.ts`; all other tools are base tools for general module editing.
 
 ## Scope
 

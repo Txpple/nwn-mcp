@@ -14,6 +14,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "dependency_graph",
     "Show resource dependency graph. Resources depend on other resources via script references, conversation assignments, etc.",
     { resource: z.string().optional().describe("Focus on a specific resource (e.g., 'forest.git'), or omit for full graph") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resource }) => {
       const index = requireIndex();
       const edges: Array<{ from: string; to: string; relationship: string }> = [];
@@ -77,6 +78,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "find_orphans",
     "Find resources that are never referenced by any other resource.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
 
@@ -128,6 +130,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "balance_report",
     "Analyze creature difficulty and item values per area.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
 
@@ -185,6 +188,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "module_summary",
     "Get a high-level summary of the entire module.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
 
@@ -240,6 +244,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "validate_module",
     "Check for broken references across the module (missing scripts, dialogs, items, door links).",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const errors: Array<{ type: string; message: string; resource?: string }> = [];
@@ -371,6 +376,7 @@ export function registerAnalysisTools(server: McpServer): void {
       difficulty: z.string().optional().describe("Difficulty: 'easy', 'medium', 'hard', 'deadly' (default 'medium')"),
       theme: z.string().optional().describe("Creature theme filter (substring match on tag/name)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ partyLevel, partySize, difficulty, theme }) => {
       const level = toI(partyLevel);
       const size = toI(partySize, 1);
@@ -489,6 +495,7 @@ export function registerAnalysisTools(server: McpServer): void {
     {
       startArea: z.string().optional().describe("Start area resref (defaults to module entry area from IFO)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ startArea }) => {
       const index = requireIndex();
 
@@ -551,6 +558,7 @@ export function registerAnalysisTools(server: McpServer): void {
     "verify_quest_completability",
     "Verify that all quests in the journal are mechanically completable. Traces from quest-start dialog through condition/action scripts to the journal end entry. Checks area reachability for quest objectives.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
 

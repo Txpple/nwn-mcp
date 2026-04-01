@@ -11,6 +11,7 @@ export function registerDialogTools(server: McpServer): void {
     "get_dialog_tree",
     "Get the raw dialog structure for a conversation file.",
     { dialog: z.string().describe("Dialog resref (e.g., 'salino')") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ dialog }) => {
       const index = requireIndex();
       const key = `${dialog.toLowerCase()}.dlg`;
@@ -27,6 +28,7 @@ export function registerDialogTools(server: McpServer): void {
       dialog: z.string().describe("Dialog resref"),
       maxDepth: z.coerce.number().optional().describe("Maximum conversation depth to traverse (default: 10)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ dialog, maxDepth }) => {
       const index = requireIndex();
       const key = `${dialog.toLowerCase()}.dlg`;
@@ -63,6 +65,7 @@ export function registerDialogTools(server: McpServer): void {
       dialog: z.string().describe("Dialog resref"),
       replyIndices: z.array(z.coerce.number()).describe("Sequence of PC reply indices to follow"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ dialog, replyIndices }) => {
       const index = requireIndex();
       const key = `${dialog.toLowerCase()}.dlg`;
@@ -139,6 +142,7 @@ export function registerDialogTools(server: McpServer): void {
     "find_dialog_scripts",
     "Find all scripts referenced in dialog files (actions and conditions).",
     { dialog: z.string().optional().describe("Specific dialog resref, or omit to search all dialogs") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ dialog }) => {
       const index = requireIndex();
       const results: Array<unknown> = [];

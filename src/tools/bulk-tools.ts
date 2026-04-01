@@ -24,6 +24,7 @@ export function registerBulkTools(server: McpServer): void {
       newTag: z.string().describe("New tag value to replace with"),
       dryRun: z.boolean().optional().default(true).describe("Preview changes without modifying (default: true)"),
     },
+    { destructiveHint: true, idempotentHint: true },
     async ({ oldTag, newTag, dryRun }) => {
       const index = requireIndex();
       const affected: Array<{ file: string; field: string; type: "gff" | "script" }> = [];
@@ -109,6 +110,7 @@ export function registerBulkTools(server: McpServer): void {
       pattern: z.string().describe("Substring to search for in resource names"),
       type: z.string().optional().describe("Filter by extension (e.g., 'nss', 'utc')"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ pattern, type }) => {
       const index = requireIndex();
       const patternLower = pattern.toLowerCase();
@@ -140,6 +142,7 @@ export function registerBulkTools(server: McpServer): void {
       area: z.string().optional().describe("Area resref. Omit for all areas."),
       dryRun: z.boolean().optional().default(true).describe("Preview mode (default: true)"),
     },
+    { destructiveHint: true },
     async ({ tagPattern, listName, area, dryRun }) => {
       const index = requireIndex();
 
@@ -236,6 +239,7 @@ export function registerBulkTools(server: McpServer): void {
       offsetY: numParam("Y offset"),
       offsetZ: optNumParam("Z offset (default 0)"),
     },
+    { idempotentHint: true },
     async ({ area, tag, listName, offsetX, offsetY, offsetZ }) => {
       const dx = toF(offsetX), dy = toF(offsetY), dz = toF(offsetZ);
       const index = requireIndex();
@@ -315,6 +319,7 @@ export function registerBulkTools(server: McpServer): void {
     {
       area: z.string().optional().describe("Area resref. Omit to fix all areas."),
     },
+    { idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);

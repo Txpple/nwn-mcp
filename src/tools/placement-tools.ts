@@ -84,6 +84,7 @@ export function registerPlacementTools(server: McpServer): void {
       bearing: optNumParam("Facing direction in degrees (default 0)"),
       collisionRadius: optNumParam("Collision detection radius in meters (default 0.75). Set to 0 to disable."),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos, bearing, collisionRadius }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos), bearingN = toF(bearing);
       const index = requireIndex();
@@ -176,6 +177,7 @@ export function registerPlacementTools(server: McpServer): void {
       bearing: optNumParam("Facing direction in degrees (default 0)"),
       stripScripts: z.string().optional().describe("Strip all event scripts from the blueprint (default 'true'). Set to 'false' to keep blueprint scripts."),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos, bearing, stripScripts }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos), bearingN = toF(bearing);
       const index = requireIndex();
@@ -297,6 +299,7 @@ export function registerPlacementTools(server: McpServer): void {
       mapNote: z.string().optional().describe("Map note text (enables map pin if provided)"),
       mapNoteEnabled: z.boolean().optional().describe("Show map note pin (default true if mapNote provided)"),
     },
+    { idempotentHint: true },
     async ({ area, tag, name, x, y, z: zPos, bearing, mapNote, mapNoteEnabled }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos), bearingN = toF(bearing);
       const index = requireIndex();
@@ -376,6 +379,7 @@ export function registerPlacementTools(server: McpServer): void {
       z: optNumParam("World Z position (default 0.0)"),
       bearing: optNumParam("Facing direction in degrees (default 0)"),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos, bearing }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos), bearingN = toF(bearing);
       const index = requireIndex();
@@ -438,6 +442,7 @@ export function registerPlacementTools(server: McpServer): void {
       y: numParam("World Y position (trigger center)"),
       z: optNumParam("World Z position (default 0.0)"),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos);
       const index = requireIndex();
@@ -523,6 +528,7 @@ export function registerPlacementTools(server: McpServer): void {
       y: numParam("World Y position (encounter center)"),
       z: optNumParam("World Z position (default 0.0)"),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos);
       const index = requireIndex();
@@ -608,6 +614,7 @@ export function registerPlacementTools(server: McpServer): void {
       y: numParam("World Y position"),
       z: optNumParam("World Z position (default 0.0)"),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos);
       const index = requireIndex();
@@ -667,6 +674,7 @@ export function registerPlacementTools(server: McpServer): void {
       y: numParam("World Y position"),
       z: optNumParam("World Z position (default 0.0)"),
     },
+    { idempotentHint: true },
     async ({ area, blueprint, x, y, z: zPos }) => {
       const xN = toF(x), yN = toF(y), zN = toF(zPos);
       const index = requireIndex();
@@ -734,6 +742,7 @@ export function registerPlacementTools(server: McpServer): void {
       containerTag: z.string().describe("Tag of the placeable container"),
       items: z.string().describe("JSON array: [{\"resref\": \"nw_it_mpotion001\", \"quantity\": 1}]"),
     },
+    { idempotentHint: true },
     async ({ area, containerTag, items: itemsJson }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
@@ -830,6 +839,7 @@ export function registerPlacementTools(server: McpServer): void {
       itemResref: z.string().optional().describe("Remove all items matching this resref"),
       index: optNumParam("Remove a specific item by 0-based index"),
     },
+    { destructiveHint: true },
     async ({ area, containerTag, itemResref, index: indexStr }) => {
       if (!itemResref && indexStr === undefined) {
         return { content: [{ type: "text", text: "Provide either itemResref or index." }] };

@@ -6,6 +6,7 @@ MCP (Model Context Protocol) server for Neverwinter Nights Enhanced Edition modu
 
 - **Do NOT auto-export HTML reports** after creating or painting areas. Only export reports when the user explicitly asks for one.
 - **Always repack after creating/painting test areas** so the user can see them in the toolset. Mention that you repacked.
+- **MCP server restart required after code changes.** After editing TypeScript source and running `npm run build`, the MCP server must be restarted for new/changed tools to become available. Ask the user to restart before attempting to use newly added tools.
 
 ## Design Intent
 
@@ -60,6 +61,32 @@ npm run start        # Run compiled output
 ```
 
 One module loaded at a time. `load_module` must be called before any other tool.
+
+### Tool Organization
+
+Tools are split between **base tools** (human-orchestrated editing) and **adventure tools** (autonomous module building):
+
+- **Base tools** (`src/tools/*.ts` except `adventure-tools.ts`) — 22 files covering reading, querying, editing, placement, and analysis. Used by both humans and the adventure creator.
+- **Adventure tools** (`src/tools/adventure-tools.ts`) — Tools specific to the `/create-adventure` pipeline: `create_adventure_transition`, `find_walkable_position`, `generate_area_layout`.
+
+All tools have **MCP annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`) set via the 4th positional arg to `server.tool()`.
+
+### Layout Generator
+
+`generate_area_layout` (in `src/util/layout-generator.ts`) is server-side procedural layout generation that encodes the area design rules from `adventure-areas/SKILL.md`. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road). Returns zones + crossers ready for `paint_terrain`, plus transition points.
+
+Uses `computeValidPairs()` from `src/util/zone-solver.ts` to validate terrain adjacency chains.
+
+#### Interior Dungeon Layout Rules
+
+- **BSP rooms**: minimum 3x3, margin=2 (4-tile wall gaps between rooms). Split threshold 10.
+- **Corridor routing**: axis-overlap detection (straight connection at shared Y/X), L-bend fallback when rooms don't overlap on either axis.
+- **S-curves**: 50% chance on straight corridors ≥5 wall tiles. Offsets middle third by 1 tile perpendicular. Creates two bends.
+- **T-junctions**: after sequential room connections, one shortcut corridor between the closest non-adjacent room pair. Creates 3-way/4-way intersections where corridors cross.
+- **Corridor crossers stay on wall tiles only.** Never extend crosser paths into room floor tiles — this creates corridor arches inside rooms (wrong). Room boundary tiles are regular floor tiles resolved by the corner grid.
+- **Crosser type**: use `corridor` (self-contained per tile). Never use `doorway` — doorway crossers require matched pairs on shared edges (arch geometry split between adjacent tiles).
+- **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
+- **Solver fallback priority for uniform corners** (all-floor room tiles): drop crossers first (preserve floor), then try corner substitution. For mixed corners (wall-floor boundaries): try corner substitution to preserve crossers first, then drop.
 
 ### Resource Loading
 
@@ -150,7 +177,9 @@ The `wok_cache/` directory is lazy-initialized on first use via `ensureWokCacheD
 
 ## Zone-Based Terrain Solver
 
-`paint_terrain` takes terrain zones + crosser paths and re-solves ALL non-feature tiles via a corner grid approach (`src/util/zone-solver.ts`). Feature tiles (from `paint_feature`) are preserved automatically. `paint_tiles` is for exact tileId manual overrides only.
+`paint_terrain` takes terrain zones + crosser paths and re-solves ALL non-feature tiles via a corner grid approach (`src/util/zone-solver.ts`). Feature tiles (from `paint_feature`) are preserved automatically. `paint_tiles` is for exact tileId manual overrides only. Pass `autoRepack: "true"` to automatically save to the .mod file after painting (prevents lost work if context runs out).
+
+`get_tileset_details` defaults to `detail: "summary"` (~2KB) which includes terrain types, crosser types, valid terrain adjacencies, and group names. Use `detail: "full"` for the complete 60-100KB tile catalog.
 
 ### Terrain Adjacency Constraint
 

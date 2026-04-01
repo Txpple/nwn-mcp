@@ -21,7 +21,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requireIndex } from "../module-loader.js";
 import { buildResmanOptions } from "../module-loader.js";
 import { MCP_FOLDER_USERREPORTS } from "../config.js";
-import { listAllTilesets, getTilesetInfo, } from "../util/tileset.js";
+import { listAllTilesets, getTilesetInfo } from "../util/tileset.js";
+import { computeValidPairs } from "../util/zone-solver.js";
 import { loadAreaWalkmeshData, computeWalkableZones, } from "../util/walkmesh.js";
 import type { AreaTransitionInfo } from "../util/walkmesh.js";
 import type { ZoneInfo } from "../util/walkmesh.js";
@@ -41,6 +42,7 @@ export function registerTilesetTools(server: McpServer): void {
     "list_tilesets",
     "List all tilesets available via resman. Returns resref, display name, interior/exterior, terrain types, crosser types, group count, and tile count for each.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
@@ -94,16 +96,52 @@ export function registerTilesetTools(server: McpServer): void {
 
   server.tool(
     "get_tileset_details",
-    "Get full details for a tileset: terrain types, crosser types, primary rules, all groups with dimensions and tile IDs, and a summary of the tile catalog organized by terrain patterns.",
+    "Get full details for a tileset: terrain types, crosser types, primary rules, all groups with dimensions and tile IDs, and a summary of the tile catalog organized by terrain patterns. Use detail='summary' (default) for a compact ~2KB overview including valid terrain adjacencies. Use detail='full' for the complete tile catalog (~60-100KB).",
     {
       tileset: z.string().describe("Tileset resref (e.g., 'ttf01' for forest, 'tdc01' for crypt)"),
+      detail: z.string().optional().describe("'summary' (default) for compact overview with adjacencies, or 'full' for complete tile catalog"),
     },
-    async ({ tileset }) => {
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ tileset, detail }) => {
+      const mode = (detail ?? "summary").toLowerCase();
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
       const info = await getTilesetInfo(tileset.toLowerCase(), resmanOpts, index);
 
-      // Organize tiles by terrain corner pattern for easier browsing
+      if (mode === "summary") {
+        // Compute valid terrain adjacency pairs
+        const validPairs = computeValidPairs(info);
+        const adjacencySet = new Set<string>();
+        for (const pair of validPairs) {
+          const [a, b] = pair.split("|");
+          if (a < b) adjacencySet.add(`${a} ↔ ${b}`);
+          else adjacencySet.add(`${b} ↔ ${a}`);
+        }
+
+        const result = {
+          resref: info.resref,
+          displayName: info.displayName,
+          interior: info.interior,
+          defaultTerrain: info.defaultTerrain,
+          terrainTypes: info.terrainTypes,
+          crosserTypes: info.crosserTypes,
+          validTerrainAdjacencies: [...adjacencySet].sort(),
+          groups: info.groups.map(g => ({
+            name: g.name,
+            size: `${g.columns}x${g.rows}`,
+          })),
+          totalTiles: info.tiles.length,
+        };
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          }],
+        };
+      }
+
+      // Full mode — existing behavior
       const tilesByPattern = new Map<string, Array<{ id: number; model: string; crossers: string; group: string | null; doorPlacements?: Array<{ x: number; y: number; z: number; orientation: number; type: number }> }>>();
       for (const tile of info.tiles) {
         const c = tile.corners;
@@ -136,9 +174,6 @@ export function registerTilesetTools(server: McpServer): void {
         defaultTerrain: info.defaultTerrain,
         terrainTypes: info.terrainTypes,
         crosserTypes: info.crosserTypes,
-        // primaryRules/secondaryRules are parsed but NOT used by the tile solver.
-        // Tile adjacency is determined entirely by corner terrains, corner heights,
-        // and crosser matching on the tile entries themselves.
         groups: info.groups.map(g => ({
           name: g.name,
           rows: g.rows,
@@ -168,6 +203,7 @@ export function registerTilesetTools(server: McpServer): void {
     {
       area: z.string().describe("Area resref (e.g., 'area001')"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
@@ -211,6 +247,7 @@ export function registerTilesetTools(server: McpServer): void {
     {
       area: z.string().describe("Area resref (e.g., 'area001')"),
     },
+    { idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
@@ -252,6 +289,7 @@ export function registerTilesetTools(server: McpServer): void {
     "export_module_report",
     "Export a self-contained HTML report of the entire module to disk. This is a human debugging tool that visualizes the spatial data for all areas: module summary, area transitions overview, and per-area interactive maps with walkmesh geometry, object markers, creature/placeable cards, and zone connectivity. Writes to module-report.html in the module temp dir. Returns the file path.",
     {},
+    { idempotentHint: true },
     async () => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);

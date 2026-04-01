@@ -70,6 +70,7 @@ export function registerJournalTools(server: McpServer): void {
     "get_journal",
     "Get all journal entries organized by quest/category.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const quests: unknown[] = [];
@@ -278,6 +279,7 @@ export function registerJournalTools(server: McpServer): void {
       comment: z.string().optional().describe("New builder comment"),
       xp: optNumParam("New experience reward"),
     },
+    { idempotentHint: true },
     async ({ tag, name, priority, comment, xp }) => {
       const priorityN = priority !== undefined ? toI(priority) : undefined;
       const xpN = xp !== undefined ? toI(xp) : undefined;
@@ -330,6 +332,7 @@ export function registerJournalTools(server: McpServer): void {
       text: z.string().optional().describe("New entry text"),
       end: z.boolean().optional().describe("Whether this entry marks quest completion"),
     },
+    { idempotentHint: true },
     async ({ questTag, id, text, end }) => {
       const idN = toI(id);
       const index = requireIndex();
@@ -381,6 +384,7 @@ export function registerJournalTools(server: McpServer): void {
     {
       tag: z.string().describe("Tag of the quest to remove"),
     },
+    { destructiveHint: true },
     async ({ tag }) => {
       const index = requireIndex();
       const jrl = findJrl(index);
@@ -423,6 +427,7 @@ export function registerJournalTools(server: McpServer): void {
       questTag: z.string().describe("Tag of the quest containing the entry"),
       id: numParam("Entry ID to remove"),
     },
+    { destructiveHint: true },
     async ({ questTag, id }) => {
       const idN = toI(id);
       const index = requireIndex();

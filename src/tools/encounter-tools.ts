@@ -10,6 +10,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_area_triggers",
     "List all triggers in a specific area with type, scripts, and linked destination.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -46,6 +47,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_area_encounters",
     "List all encounters in a specific area with creature list and spawn conditions.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -93,6 +95,7 @@ export function registerEncounterTools(server: McpServer): void {
     "list_stores",
     "List all stores in the module with name and markup.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const stores: unknown[] = [];
@@ -125,6 +128,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_store_details",
     "Get full details for a store including inventory and pricing.",
     { resref: z.string().describe("Store resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref }) => {
       const index = requireIndex();
       const doc = index.parsedGff.get(`${resref}.utm`);
@@ -168,6 +172,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_area_waypoints",
     "List all waypoints in a specific area with tag, position, and map note.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -196,6 +201,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_area_sounds",
     "List all sound objects in a specific area.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -226,6 +232,7 @@ export function registerEncounterTools(server: McpServer): void {
     "get_faction_details",
     "List factions and reputation relationships from the module's .fac file.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
 
@@ -275,6 +282,7 @@ export function registerEncounterTools(server: McpServer): void {
     {
       factionId: z.coerce.number().describe("Faction ID to filter by"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ factionId }) => {
       const index = requireIndex();
       const matching = index.creatures

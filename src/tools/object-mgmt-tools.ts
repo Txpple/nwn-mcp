@@ -3,6 +3,7 @@
  *
  * Tools:
  * - link_doors: Link two doors for area transitions
+ * - create_area_transition: One-way trigger→waypoint transition
  * - remove_object: Remove an object from an area's GIT by tag or index
  * - move_object: Move an object to a new position in an area
  */
@@ -21,7 +22,6 @@ import type { GffObj } from "../types/gff.js";
 import { snapshotGitForUndo } from "../util/undo.js";
 import { compileScript, jsonToGff } from "../nim-tools.js";
 import { checkPlacementWalkable } from "../util/walkmesh.js";
-import type { GffDocument } from "../types/gff.js";
 
 /** List names excluded from walkability validation (doors sit on walls, sounds are ambient) */
 const WALK_CHECK_SKIP_LISTS = new Set(["Door List", "SoundList"]);
@@ -39,6 +39,7 @@ export function registerObjectMgmtTools(server: McpServer): void {
       area2: z.string().describe("Second area resref"),
       door2Tag: z.string().describe("Tag of the door in area2"),
     },
+    { idempotentHint: true },
     async ({ area1, door1Tag, area2, door2Tag }) => {
       const index = requireIndex();
 
@@ -328,238 +329,6 @@ export function registerObjectMgmtTools(server: McpServer): void {
     },
   );
 
-  // ─── create_adventure_transition ───────────────────────────────────────
-
-  server.tool(
-    "create_adventure_transition",
-    "Create a one-way area transition for adventure modules: places a useable blue shaft of light (plc_solblue) in the source area and a waypoint in the target area. The light's OnUsed script plays VFX_FNF_SUMMON_MONSTER_2, then jumps the PC to the destination waypoint after 2 seconds. For two-way transitions, call twice with swapped source/target.",
-    {
-      sourceArea: z.string().describe("Area resref where the blue light is placed"),
-      sourceX: numParam("Light X position in source area"),
-      sourceY: numParam("Light Y position in source area"),
-      sourceZ: optNumParam("Light Z position (default: walkmesh height)"),
-      targetArea: z.string().describe("Area resref where the waypoint is placed"),
-      targetX: numParam("Waypoint X position in target area"),
-      targetY: numParam("Waypoint Y position in target area"),
-      targetZ: optNumParam("Waypoint Z position (default: walkmesh height)"),
-      tag: z.string().describe("Base tag for naming. Max 11 chars. Light tag = 'at_<tag>', waypoint tag = 'wp_<tag>', script resref = 'a_at_<tag>' (16-char limit)."),
-    },
-    async ({ sourceArea, sourceX, sourceY, sourceZ, targetArea, targetX, targetY, targetZ, tag }) => {
-      const sxN = toF(sourceX), syN = toF(sourceY), szN = toF(sourceZ);
-      const txN = toF(targetX), tyN = toF(targetY), tzN = toF(targetZ);
-      const index = requireIndex();
-      const resmanOpts = await buildResmanOptions(index);
-
-      // Walkmesh validation for both positions
-      const srcWalk = await checkPlacementWalkable(sxN, syN, sourceArea.toLowerCase(), index, resmanOpts);
-      if (!srcWalk.ok) {
-        return { content: [{ type: "text", text: JSON.stringify({ error: "Source position not safe", area: sourceArea, position: { x: sxN, y: syN }, detail: srcWalk.reason }, null, 2) }] };
-      }
-      const tgtWalk = await checkPlacementWalkable(txN, tyN, targetArea.toLowerCase(), index, resmanOpts);
-      if (!tgtWalk.ok) {
-        return { content: [{ type: "text", text: JSON.stringify({ error: "Target position not safe", area: targetArea, position: { x: txN, y: tyN }, detail: tgtWalk.reason }, null, 2) }] };
-      }
-
-      const lightTag = `at_${tag}`.substring(0, 32);
-      const wpTag = `wp_${tag}`.substring(0, 32);
-      const scriptResref = `a_at_${tag}`.substring(0, 16);
-      const dlgResref = `d_at_${tag}`.substring(0, 16);
-
-      // 1. Write transition script with VFX + delayed jump
-      const scriptSource = [
-        "void main() {",
-        "    object oPC = GetPCSpeaker();",
-        "    if (!GetIsPC(oPC)) return;",
-        `    object oWP = GetWaypointByTag("${wpTag}");`,
-        "    ApplyEffectToObject(DURATION_TYPE_INSTANT, EffectVisualEffect(VFX_FNF_SUMMON_MONSTER_2), oPC);",
-        "    DelayCommand(2.0, AssignCommand(oPC, JumpToObject(oWP)));",
-        "}",
-      ].join("\n");
-
-      const nssPath = path.join(index.tempDir, `${scriptResref}.nss`);
-      await fsPromises.writeFile(nssPath, scriptSource, "utf-8");
-      const nssStat = await fsPromises.stat(nssPath);
-      index.resources.set(`${scriptResref}.nss`, { resref: scriptResref, extension: "nss", filePath: nssPath, sizeBytes: nssStat.size });
-
-      const ncsPath = nssPath.replace(/\.nss$/i, ".ncs");
-      const compResult = await compileScript(nssPath, ncsPath, { resman: resmanOpts });
-      if (compResult.success) {
-        try {
-          const ncsStat = await fsPromises.stat(ncsPath);
-          index.resources.set(`${scriptResref}.ncs`, { resref: scriptResref, extension: "ncs", filePath: ncsPath, sizeBytes: ncsStat.size });
-        } catch { /* ncs may not exist if compiler mocked */ }
-      }
-
-      // 2. Create dialog: NPC asks "Enter the portal?", PC chooses yes (fires script) or no
-      const dlgDoc: GffDocument = {
-        __data_type: "DLG ",
-        DelayEntry: { type: "dword", value: 0 },
-        DelayReply: { type: "dword", value: 0 },
-        EndConverAbort: { type: "resref", value: "" },
-        EndConversation: { type: "resref", value: "" },
-        NumWords: { type: "dword", value: 0 },
-        PreventZoomIn: { type: "byte", value: 1 },
-        StartingList: { type: "list", value: [
-          { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-        ]},
-        EntryList: { type: "list", value: [
-          // Entry 0: NPC prompt
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: "" },
-            Sound: { type: "resref", value: "" },
-            Speaker: { type: "cexostring", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "A shimmering portal beckons you forward. Do you wish to step through?" } },
-            RepliesList: { type: "list", value: [
-              { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-              { __struct_id: 0, Index: { type: "dword", value: 1 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-            ]},
-          },
-        ]},
-        ReplyList: { type: "list", value: [
-          // Reply 0: Yes — fires transition script
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: scriptResref },
-            Sound: { type: "resref", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "[Step through the portal]" } },
-            EntriesList: { type: "list", value: [] },
-          },
-          // Reply 1: No — ends conversation
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: "" },
-            Sound: { type: "resref", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "[Turn away]" } },
-            EntriesList: { type: "list", value: [] },
-          },
-        ]},
-      };
-
-      const dlgPath = path.join(index.tempDir, `${dlgResref}.dlg`);
-      await jsonToGff(dlgDoc, dlgPath);
-      const dlgStat = await fsPromises.stat(dlgPath);
-      index.resources.set(`${dlgResref}.dlg`, { resref: dlgResref, extension: "dlg", filePath: dlgPath, sizeBytes: dlgStat.size });
-      index.parsedGff.set(`${dlgResref}.dlg`, dlgDoc);
-
-      // 2. Place waypoint in target area
-      const waypoint: GffObj = {
-        __struct_id: GIT_STRUCT_ID.WAYPOINT,
-        Appearance: { type: "byte", value: 1 },
-        Description: { type: "cexolocstring", value: {} },
-        HasMapNote: { type: "byte", value: 0 },
-        LinkedTo: { type: "cexostring", value: "" },
-        LocalizedName: { type: "cexolocstring", value: { "0": `Transition: ${tag}` } },
-        MapNote: { type: "cexolocstring", value: {} },
-        MapNoteEnabled: { type: "byte", value: 0 },
-        Tag: { type: "cexostring", value: wpTag },
-        TemplateResRef: { type: "resref", value: "" },
-        XPosition: { type: "float", value: txN },
-        YPosition: { type: "float", value: tyN },
-        ZPosition: { type: "float", value: tgtWalk.z ?? tzN },
-        XOrientation: { type: "float", value: 0 },
-        YOrientation: { type: "float", value: 1 },
-      };
-
-      const { doc: targetGitDoc, obj: targetGit } = getGitDoc(index, targetArea);
-      snapshotGitForUndo(targetGitDoc, targetArea, "create_adventure_transition", `Place waypoint ${wpTag}`);
-      const wpList = getFieldList(targetGit, "WaypointList");
-      wpList.push(waypoint);
-      await writeBackGit(index, targetArea, targetGitDoc);
-      updateAreaCounts(index, targetArea);
-
-      // 3. Place useable blue shaft of light in source area
-      const plcBlueprint = await resolveBlueprint(index, "plc_solblue", "utp", resmanOpts);
-      let lightObj: GffObj;
-      if (plcBlueprint) {
-        lightObj = plcBlueprint as GffObj;
-        delete lightObj.__data_type;
-      } else {
-        lightObj = {};
-      }
-      lightObj.__struct_id = GIT_STRUCT_ID.PLACEABLE;
-      setField(lightObj, "Tag", "cexostring", lightTag);
-      setField(lightObj, "TemplateResRef", "resref", "");
-      // Placeables use LocName (not LocalizedName) for display name
-      lightObj.LocName = { type: "cexolocstring", value: { "0": "Area Transition" } };
-      lightObj.LocalizedName = { type: "cexolocstring", value: { "0": "Area Transition" } };
-      lightObj.X = { type: "float", value: sxN };
-      lightObj.Y = { type: "float", value: syN };
-      lightObj.Z = { type: "float", value: srcWalk.z ?? szN };
-      lightObj.Bearing = { type: "float", value: 0 };
-
-      // Make it interactive — plot, useable, not static
-      setField(lightObj, "Static", "byte", 0);
-      setField(lightObj, "Useable", "byte", 1);
-      setField(lightObj, "Conversation", "resref", dlgResref);
-      setField(lightObj, "HasInventory", "byte", 0);
-      setField(lightObj, "Plot", "byte", 1);
-
-      // OnUsed script that begins the conversation
-      const onUsedResref = `u_at_${tag}`.substring(0, 16);
-      const onUsedSource = [
-        "void main() {",
-        `    BeginConversation("${dlgResref}", GetLastUsedBy());`,
-        "}",
-      ].join("\n");
-      const onUsedNssPath = path.join(index.tempDir, `${onUsedResref}.nss`);
-      await fsPromises.writeFile(onUsedNssPath, onUsedSource, "utf-8");
-      const onUsedStat = await fsPromises.stat(onUsedNssPath);
-      index.resources.set(`${onUsedResref}.nss`, { resref: onUsedResref, extension: "nss", filePath: onUsedNssPath, sizeBytes: onUsedStat.size });
-      const onUsedNcsPath = onUsedNssPath.replace(/\.nss$/i, ".ncs");
-      const onUsedComp = await compileScript(onUsedNssPath, onUsedNcsPath, { resman: resmanOpts });
-      if (onUsedComp.success) {
-        try {
-          const ncsStat = await fsPromises.stat(onUsedNcsPath);
-          index.resources.set(`${onUsedResref}.ncs`, { resref: onUsedResref, extension: "ncs", filePath: onUsedNcsPath, sizeBytes: ncsStat.size });
-        } catch { /* ncs may not exist if compiler mocked */ }
-      }
-      setField(lightObj, "OnUsed", "resref", onUsedResref);
-
-      // Set LinkedTo metadata for connectivity checks
-      setField(lightObj, "LinkedTo", "cexostring", wpTag);
-
-      const { doc: sourceGitDoc, obj: sourceGit } = getGitDoc(index, sourceArea);
-      snapshotGitForUndo(sourceGitDoc, sourceArea, "create_adventure_transition", `Place light ${lightTag}`);
-      const placeableList = getFieldList(sourceGit, "Placeable List");
-      placeableList.push(lightObj);
-      await writeBackGit(index, sourceArea, sourceGitDoc);
-      updateAreaCounts(index, sourceArea);
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            transition: {
-              source: { area: sourceArea, lightTag, position: { x: sxN, y: syN, z: srcWalk.z ?? szN } },
-              target: { area: targetArea, waypointTag: wpTag, position: { x: txN, y: tyN, z: tgtWalk.z ?? tzN } },
-              dialog: dlgResref,
-              script: scriptResref,
-              compiled: compResult.success,
-              ...(compResult.success ? {} : { compilerOutput: compResult.output }),
-            },
-          }, null, 2),
-        }],
-      };
-    },
-  );
-
   // ─── remove_object ─────────────────────────────────────────────────────
 
   server.tool(
@@ -571,6 +340,7 @@ export function registerObjectMgmtTools(server: McpServer): void {
       tag: z.string().optional().describe("Tag of the object to remove (first match)"),
       index: optNumParam("0-based index in the list"),
     },
+    { destructiveHint: true },
     async ({ area, listName, tag, index: removeIndex }) => {
       if (tag === undefined && removeIndex === undefined) {
         return { content: [{ type: "text", text: "Must provide either 'tag' or 'index'" }] };
@@ -638,6 +408,7 @@ export function registerObjectMgmtTools(server: McpServer): void {
       y: numParam("New Y position"),
       z: optNumParam("New Z position (keeps current if omitted)"),
     },
+    { idempotentHint: true },
     async ({ area, listName, tag, index: moveIndex, x, y, z: zPos }) => {
       if (tag === undefined && moveIndex === undefined) {
         return { content: [{ type: "text", text: "Must provide either 'tag' or 'index'" }] };

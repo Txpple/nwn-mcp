@@ -11,6 +11,7 @@ export function registerAreaTools(server: McpServer): void {
     "list_areas",
     "List all areas in the module with dimensions and object counts.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const areas = [...index.areas.values()];
@@ -22,6 +23,7 @@ export function registerAreaTools(server: McpServer): void {
     "get_area_details",
     "Get full details for an area including properties, lighting, weather, and music.",
     { area: z.string().describe("Area resref (e.g., 'forest')") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const areDoc = index.parsedGff.get(`${area}.are`);
@@ -88,6 +90,7 @@ export function registerAreaTools(server: McpServer): void {
     "get_area_creatures",
     "List all creatures placed in a specific area with their stats.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const areaCreatures = index.creatures.filter(c => c.area === area);
@@ -99,6 +102,7 @@ export function registerAreaTools(server: McpServer): void {
     "get_area_placeables",
     "List all placeables in a specific area.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -140,6 +144,7 @@ export function registerAreaTools(server: McpServer): void {
     "get_area_items",
     "List all items placed on the ground in a specific area.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -169,6 +174,7 @@ export function registerAreaTools(server: McpServer): void {
     "get_area_doors",
     "List all doors in a specific area with lock status and destinations.",
     { area: z.string().describe("Area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       const gitDoc = index.parsedGff.get(`${area}.git`);
@@ -206,6 +212,7 @@ export function registerAreaTools(server: McpServer): void {
       onHeartbeat: z.string().optional().describe("OnHeartbeat script resref"),
       onUserDefined: z.string().optional().describe("OnUserDefined script resref"),
     },
+    { idempotentHint: true },
     async ({ area, onEnter, onExit, onHeartbeat, onUserDefined }) => {
       const index = requireIndex();
       const areKey = `${area.toLowerCase()}.are`;
@@ -274,6 +281,7 @@ export function registerAreaTools(server: McpServer): void {
       Mod_OnUnAqreItem: z.string().optional().describe("OnUnAcquireItem script"),
       Mod_OnUsrDefined: z.string().optional().describe("OnUserDefined script"),
     },
+    { idempotentHint: true },
     async (params) => {
       const index = requireIndex();
       const ifoDoc = index.parsedGff.get("module.ifo");

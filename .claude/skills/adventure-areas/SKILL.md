@@ -118,9 +118,19 @@ Propose area dimensions based on the plot's description of the location's scale:
 - Medium area: 12x12 to 14x14
 - Large exploration area: 16x16 to 18x18
 
-Plan the terrain layout: which zones go where, what crossers are needed, what multi-tile features to place. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
+**Preferred approach: Use `generate_area_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road).
 
-Only call `get_tileset_details` if you need specific group names for `paint_feature`. `list_tilesets` is sufficient for terrain/crosser planning.
+```
+generate_area_layout(tileset="tdc01", width="10", height="10",
+  style='{"type":"dungeon","rooms":3,"corridorStyle":"straight"}',
+  transitionCount="2", transitionDirections='["south","north"]')
+```
+
+The result contains `zones` and `crossers` ready to pass directly to `paint_terrain`, plus `transitionPoints` with guaranteed in-bounds coordinates.
+
+**Fallback:** If `generate_area_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
+
+Only call `get_tileset_details` if you need specific group names for `paint_feature`. Use `detail="summary"` (the default) for a compact ~2KB overview with terrain adjacencies — only use `detail="full"` if you need the complete tile catalog.
 
 ---
 
@@ -132,7 +142,7 @@ Execute in this order:
 
 2. **Paint features first** — `paint_feature` for any multi-tile groups (temples, lodges, bridges). These are preserved by the terrain solver.
 
-3. **Paint terrain + crossers** — A single `paint_terrain` call with ALL terrain zones and crosser paths. The zone-based solver derives all tile assignments including transitions. Feature tiles are never overwritten.
+3. **Paint terrain + crossers** — A single `paint_terrain` call with ALL terrain zones and crosser paths. Pass `autoRepack: "true"` to save progress to the .mod file immediately (prevents lost work if context runs out). The zone-based solver derives all tile assignments including transitions. Feature tiles are never overwritten.
 
    **CRITICAL — Perimeter encapsulation (applies to BOTH interior and exterior areas):**
 
@@ -252,6 +262,8 @@ The tool places a useable blue shaft of light ("Area Transition") with an OnUsed
 Place the target waypoint at the same position as the destination portal. Since portals require clicking (not walk-through), there's no risk of re-triggering.
 
 **Transition placement rules:**
+- **Use `generate_area_layout` transition points** when available — these are pre-computed walkable coordinates near the correct edge.
+- **Use `find_walkable_position`** to get guaranteed walkable coordinates if you need to place transitions manually: `find_walkable_position(area="myarea", region="south")` returns validated positions with Z height.
 - **On crosser paths (roads/streams):** Place the light on the **last crosser tile before the border** — the tile where the crosser ends. Center on that tile (tile_col * 10 + 5, tile_row * 10 + 5).
 - **Without crossers:** Place the light on the walkable tile closest to the cliff/wall edge. Typically at row 1 or row (height-2), col 1 or col (width-2).
 - **At buildings/structures:** Place the light directly in front of feature doors.
@@ -296,6 +308,20 @@ Repack the module with `repack_module`.
 - **Terrain names must match the tile catalog key.** Use short lowercase names (e.g., `"floor"` not `"floor (interior)"`). Use `defaultTerrain` from `list_tilesets` as reference.
 - **Corridor crossers go on Wall tiles.** Bridge crossers go on Pit tiles. Road/Stream on Grass.
 - **Void terrain must be visible.** Add a doorway crosser at wall/chasm boundaries so players can see into pits.
+
+**CRITICAL — Interior tileset room type isolation:**
+
+Many interior tilesets (e.g., `tic01`, `tin01`) have multiple named room terrain types (Stone, Jail, Library, Rich, Shop, Inn, Livingroom, etc.). Each type is a self-contained visual style. **Two different room types can only be connected if the tileset contains a tile with mixed-type corners AND a corridor/doorway crosser between them.** If no such tile exists, the two rooms will be permanently separated by a solid wall — the player literally cannot walk between them.
+
+**Before designing a multi-room-type layout:**
+1. Call `get_tileset_details` on the tileset.
+2. Scan the tile catalog for tiles whose `cornerTerrains` mix the two types you want to connect (e.g., `{tl: "stone", tr: "jail", ...}`) AND have a crosser (`"top"/"bottom"/"left"/"right"` non-empty).
+3. If such tiles exist → you CAN connect those room types with a Corridor crosser on the Wall boundary tiles between them. Add an explicit crosser path in your `paint_terrain` call at the boundary.
+4. If NO such mixed-type corridor tiles exist → do NOT mix those room types in the same area. Use one of:
+   - **Single room type throughout** — use one terrain type (e.g., all Stone) and add `paint_feature` groups for visual variety within it.
+   - **Separate areas** — put each room type in its own area, connected via `create_adventure_transition`.
+
+**Never assume mixed room types can connect.** Always verify first.
 
 ## Crosser Behavior at Terrain Boundaries
 

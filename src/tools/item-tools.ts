@@ -12,6 +12,7 @@ export function registerItemTools(server: McpServer): void {
     "list_items",
     "List all item blueprints in the module.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       return { content: [{ type: "text", text: JSON.stringify(index.items, null, 2) }] };
@@ -25,6 +26,7 @@ export function registerItemTools(server: McpServer): void {
       resref: z.string().optional().describe("Item blueprint resref"),
       tag: z.string().optional().describe("Item tag"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref, tag }) => {
       const index = requireIndex();
 
@@ -101,6 +103,7 @@ export function registerItemTools(server: McpServer): void {
       param1: optNumParam("Param1 table index (default 255 = no param)"),
       param1Value: optNumParam("Param1 value (default 0)"),
     },
+    { idempotentHint: true },
     async ({ resref, propertyName, subType, costTable, costValue, param1, param1Value }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.uti`;
@@ -181,6 +184,7 @@ export function registerItemTools(server: McpServer): void {
       resref: z.string().describe("Item blueprint resref"),
       index: numParam("0-based index in PropertiesList"),
     },
+    { destructiveHint: true },
     async ({ resref, index: indexStr }) => {
       const removeIdx = toI(indexStr);
       const moduleIndex = requireIndex();
@@ -226,6 +230,7 @@ export function registerItemTools(server: McpServer): void {
     {
       resref: z.string().describe("Item blueprint resref"),
     },
+    { destructiveHint: true },
     async ({ resref }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.uti`;

@@ -14,6 +14,7 @@ export function registerCoreReadTools(server: McpServer): void {
     "load_module",
     "Load and index a NWN module (.mod) file. Must be called before using other tools. If just a filename is given (e.g., 'mymod.mod'), it is resolved from the NWN_FOLDER_USER/modules/ directory.",
     { modPath: z.string().describe("Module filename (e.g., 'mymod.mod') or absolute path") },
+    { idempotentHint: true },
     async ({ modPath }) => {
       // Resolve relative names from NWN_FOLDER_USER/modules/
       let resolvedPath = modPath;
@@ -59,6 +60,7 @@ export function registerCoreReadTools(server: McpServer): void {
     "list_resources",
     "List all resources in the loaded module, optionally filtered by type (extension).",
     { type: z.string().optional().describe("Filter by extension (e.g., 'uti', 'dlg', 'nss')") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ type }) => {
       const index = requireIndex();
       const results: Array<{ resref: string; type: string; sizeBytes: number }> = [];
@@ -78,6 +80,7 @@ export function registerCoreReadTools(server: McpServer): void {
       resref: z.string().describe("Resource name without extension (e.g., 'innkey')"),
       type: z.string().describe("Resource extension (e.g., 'uti', 'dlg', 'nss')"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref, type }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.${type.toLowerCase()}`;
@@ -123,6 +126,7 @@ export function registerCoreReadTools(server: McpServer): void {
     "get_module_info",
     "Get parsed module.ifo data: areas, entry point, scripts, time settings.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const ifo = index.parsedGff.get("module.ifo");
@@ -179,6 +183,7 @@ export function registerCoreReadTools(server: McpServer): void {
       tag: z.string().describe("Tag to search for"),
       exactMatch: z.boolean().optional().describe("If false, does case-insensitive substring match (default: false)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ tag, exactMatch }) => {
       const index = requireIndex();
       const results: Array<{ tag: string; resourceFile: string; objectType: string; name?: string; gffPath: string }> = [];
@@ -211,6 +216,7 @@ export function registerCoreReadTools(server: McpServer): void {
       value: z.string().optional().describe("Optional value to match (string comparison)"),
       type: z.string().optional().describe("Filter by resource type/extension"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ fieldName, value, type }) => {
       const index = requireIndex();
       const results: Array<{ resourceFile: string; path: string; value: unknown; gffType: string }> = [];

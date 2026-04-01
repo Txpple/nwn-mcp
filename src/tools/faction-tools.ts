@@ -102,6 +102,7 @@ export function registerFactionTools(server: McpServer): void {
       faction2: numParam("Second faction ID"),
       reputation: numParam("Reputation value (0=hostile, 50=neutral, 100=friendly)"),
     },
+    { idempotentHint: true },
     async ({ faction1, faction2, reputation }) => {
       const f1 = toI(faction1), f2 = toI(faction2), rep = toI(reputation);
 

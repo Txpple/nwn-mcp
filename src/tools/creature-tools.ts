@@ -13,6 +13,7 @@ export function registerCreatureTools(server: McpServer): void {
     "list_creatures",
     "List all creatures in the module, optionally filtered by area.",
     { area: z.string().optional().describe("Filter by area resref") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
       let creatures = index.creatures;
@@ -31,6 +32,7 @@ export function registerCreatureTools(server: McpServer): void {
       area: z.string().optional().describe("Area resref (required with index)"),
       index: z.coerce.number().optional().describe("Creature index in area's creature list"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ tag, area, index: creatureIndex }) => {
       const moduleIndex = requireIndex();
 
@@ -174,6 +176,7 @@ export function registerCreatureTools(server: McpServer): void {
       equipment: z.string().describe("JSON object: {\"righthand\": \"nw_wswls001\", \"chest\": \"nw_cloth001\"}"),
       replace: z.boolean().optional().default(false).describe("Replace all equipment (true) or merge (false, default)"),
     },
+    { idempotentHint: true },
     async ({ area, tag, equipment: equipJson, replace }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
@@ -265,6 +268,7 @@ export function registerCreatureTools(server: McpServer): void {
       tag: z.string().describe("Creature tag"),
       slot: z.string().optional().describe("Specific slot name to clear (e.g., 'righthand'). Omit to clear all."),
     },
+    { destructiveHint: true },
     async ({ area, tag, slot }) => {
       const index = requireIndex();
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);

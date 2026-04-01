@@ -118,6 +118,7 @@ export function registerDatabaseTools(server: McpServer): void {
       "Database naming: mod_<module>.sqlite3 for module-level, _<charname>.sqlite3 for local characters, " +
       "<serverid>_<charname>.sqlite3 for server characters, with _hench_tagid_NNN suffixes for henchmen.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const dbDir = getDatabaseDir();
 
@@ -228,6 +229,7 @@ export function registerDatabaseTools(server: McpServer): void {
       varname: z.string().describe("Variable name in the db table (e.g. 'HENCH_TAGID_001')"),
       playerid: z.string().optional().describe("Player ID filter (default: empty string)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ database, varname, playerid }) => {
       const pid = playerid ?? "";
       const db = await openDb(database);
@@ -287,6 +289,7 @@ export function registerDatabaseTools(server: McpServer): void {
       playerid: z.string().optional().describe("Player ID (default: empty string)"),
       data: z.string().describe("GFF document as JSON string"),
     },
+    { idempotentHint: true },
     async ({ database, varname, playerid, data }) => {
       const pid = playerid ?? "";
       const doc = JSON.parse(data);

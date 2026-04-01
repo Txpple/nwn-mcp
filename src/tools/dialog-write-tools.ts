@@ -419,6 +419,7 @@ export function registerDialogWriteTools(server: McpServer): void {
       sound: z.string().optional().describe("New sound resref"),
       comment: z.string().optional().describe("New builder comment"),
     },
+    { idempotentHint: true },
     async ({ dialog, nodeType, nodeIndex, text, script, sound, comment }) => {
       if (text === undefined && script === undefined && sound === undefined && comment === undefined) {
         return { content: [{ type: "text", text: "Must provide at least one field to edit (text, script, sound, or comment)" }], isError: true };

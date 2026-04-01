@@ -12,6 +12,7 @@ export function registerScriptTools(server: McpServer): void {
     "read_script_source",
     "Read the NWScript (.nss) source code for a script.",
     { resref: z.string().describe("Script resref without extension") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.nss`;
@@ -27,6 +28,7 @@ export function registerScriptTools(server: McpServer): void {
     "disassemble_script",
     "Disassemble compiled NWScript (.ncs) bytecode.",
     { resref: z.string().describe("Script resref without extension") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref }) => {
       const index = requireIndex();
       const key = `${resref.toLowerCase()}.ncs`;
@@ -49,6 +51,7 @@ export function registerScriptTools(server: McpServer): void {
       resref: z.string().describe("Script resref without extension"),
       includePaths: z.array(z.string()).optional().describe("Additional include paths for nwscript.nss etc."),
     },
+    { idempotentHint: true },
     async ({ resref, includePaths }) => {
       const index = requireIndex();
       const nssKey = `${resref.toLowerCase()}.nss`;
@@ -80,6 +83,7 @@ export function registerScriptTools(server: McpServer): void {
     "find_variable_usage",
     "Find all scripts that use Get/SetLocal* functions with a given variable name.",
     { variableName: z.string().describe("Variable name to search for") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ variableName }) => {
       const index = requireIndex();
       const results: VariableRef[] = [];
@@ -134,6 +138,7 @@ export function registerScriptTools(server: McpServer): void {
       pattern: z.string().describe("Text or pattern to search for"),
       caseSensitive: z.boolean().optional().describe("Case-sensitive search (default: false)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ pattern, caseSensitive }) => {
       const index = requireIndex();
       const results: Array<{ resref: string; line: number; context: string }> = [];
@@ -167,6 +172,7 @@ export function registerScriptTools(server: McpServer): void {
     "list_script_references",
     "Show where scripts are referenced from in GFF files (event handlers, dialog actions, etc.).",
     { resref: z.string().optional().describe("Specific script resref, or omit to list all") },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resref }) => {
       const index = requireIndex();
 
@@ -199,6 +205,7 @@ export function registerScriptTools(server: McpServer): void {
       source: z.string().describe("The NWScript source code to write"),
       compile: z.boolean().optional().describe("Compile after writing (default true)"),
     },
+    { idempotentHint: true },
     async ({ resref, source, compile: doCompile }) => {
       const index = requireIndex();
       const resrefLower = resref.toLowerCase();

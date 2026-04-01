@@ -17,6 +17,7 @@ export function registerResmanTools(server: McpServer): void {
     {
       resource: z.string().describe("Resource filename with extension (e.g., 'nw_cloth001.uti')"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ resource }) => {
       const index = requireIndex();
 
@@ -48,6 +49,7 @@ export function registerResmanTools(server: McpServer): void {
       binary: z.string().optional().describe("Binary/text content to search for within resource data"),
       invert: z.boolean().optional().describe("Invert match (find resources NOT matching)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ pattern, binary, invert }) => {
       if (!pattern && !binary) {
         return { content: [{ type: "text", text: "Provide either pattern or binary (or both) to search." }] };
@@ -75,6 +77,7 @@ export function registerResmanTools(server: McpServer): void {
     {
       detailed: z.boolean().optional().describe("Show per-container file lists (default: summary only)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ detailed }) => {
       const index = requireIndex();
       const resman = await buildResmanOptions(index);
@@ -94,6 +97,7 @@ export function registerResmanTools(server: McpServer): void {
       outputTlkPath: z.string().describe("Path to write the generated TLK file"),
       outputModPath: z.string().optional().describe("Path for the TLKified module (defaults to <original>.tlkified.mod)"),
     },
+    { idempotentHint: true },
     async ({ outputTlkPath, outputModPath }) => {
       const index = requireIndex();
       const outMod = outputModPath || index.modPath.replace(/\.mod$/i, ".tlkified.mod");
@@ -128,6 +132,7 @@ export function registerResmanTools(server: McpServer): void {
       pattern: z.string().describe("Search term — matches against resref, tag, and display name"),
       limit: z.string().optional().describe("Max results to return (default 20, max 50)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ type: bpType, pattern: searchPattern, limit }) => {
       const index = requireIndex();
       const resman = await buildResmanOptions(index);

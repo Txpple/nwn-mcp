@@ -56,6 +56,7 @@ export function registerUndoTools(server: McpServer): void {
     "undo_history",
     "View the undo stack — recent GIT mutations that can be reverted.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const stack = getUndoStack();
       if (stack.length === 0) {

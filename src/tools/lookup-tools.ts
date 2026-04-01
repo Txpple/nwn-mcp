@@ -16,6 +16,7 @@ export function registerLookupTools(server: McpServer): void {
       row: numParam("Row index to look up"),
       column: z.string().optional().describe("Specific column to return (returns full row if omitted)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ table, row: rowStr, column }) => {
       const index = requireIndex();
       const row = toI(rowStr);
@@ -65,6 +66,7 @@ export function registerLookupTools(server: McpServer): void {
       column: z.string().describe("Column name to search"),
       value: z.string().describe("Value to search for (case-insensitive substring)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ table, column, value }) => {
       const index = requireIndex();
       const twoDA = index.twodaTables.get(table.toLowerCase());
@@ -99,6 +101,7 @@ export function registerLookupTools(server: McpServer): void {
     "list_2da_tables",
     "List all 2DA tables available in the loaded module.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       const index = requireIndex();
       const tables = [...index.twodaTables.entries()].map(([name, table]) => ({
@@ -116,6 +119,7 @@ export function registerLookupTools(server: McpServer): void {
     {
       strref: numParam("String reference number to look up"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ strref: strrefStr }) => {
       const index = requireIndex();
       const strref = toI(strrefStr);
@@ -166,6 +170,7 @@ export function registerLookupTools(server: McpServer): void {
       start: numParam("Starting strref index (default: 0)").optional(),
       count: numParam("Max entries to return (default: 50, max: 200)").optional(),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ source, filter, start: startStr, count: countStr }) => {
       const index = requireIndex();
       const src = source || "custom";
@@ -213,6 +218,7 @@ export function registerLookupTools(server: McpServer): void {
       query: z.string().describe("Text to search for"),
       source: z.enum(["custom", "base", "both"]).optional().describe("Which TLK to search (default: both)"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ query, source }) => {
       const index = requireIndex();
       const src = source || "both";
@@ -256,6 +262,7 @@ export function registerLookupTools(server: McpServer): void {
     {
       strref: numParam("String reference number to search for"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ strref: strrefStr }) => {
       const index = requireIndex();
       const strref = toI(strrefStr);

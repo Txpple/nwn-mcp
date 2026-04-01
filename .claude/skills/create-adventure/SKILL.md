@@ -60,7 +60,18 @@ Before starting the pipeline, resolve these with the user:
 **CRITICAL: Never use the `Skill` tool to invoke sub-skills during the pipeline.** The Skill tool runs inline — all of its reasoning, tool calls, and output appear directly in the user's chat, leaking spoilers. Instead, use the **Agent tool** (`subagent_type: "general-purpose"`) for every sub-skill invocation after pre-flight.
 
 **How to invoke each sub-skill:**
-1. Use the Agent tool with a prompt like: *"You are the /adventure-areas sub-skill. Read your instructions from `.claude/skills/areas/SKILL.md`, then execute them. Adventure doc: `<path>/adventure.md`. Module: `<name>`."*
+1. Use the Agent tool with a prompt like: *"You are the /adventure-areas sub-skill. Read your instructions from `.claude/skills/adventure-areas/SKILL.md`, then execute them. Adventure doc: `<path>/adventure.md`. Module: `<name>`."*
+
+   **Sub-skill SKILL.md paths** (all relative to the project root, e.g. `C:\Users\sippelmc\Desktop\nwn-mcp`):
+   - plot → `.claude/skills/adventure-plot/SKILL.md`
+   - areas → `.claude/skills/adventure-areas/SKILL.md`
+   - environment → `.claude/skills/adventure-environment/SKILL.md`
+   - actors → `.claude/skills/adventure-actors/SKILL.md`
+   - quests → `.claude/skills/adventure-quests/SKILL.md`
+   - challenges → `.claude/skills/adventure-challenges/SKILL.md`
+   - affordances → `.claude/skills/adventure-affordances/SKILL.md`
+   - polish → `.claude/skills/adventure-polish/SKILL.md`
+   - rewards → `.claude/skills/adventure-rewards/SKILL.md`
 2. **Do NOT read the sub-skill's SKILL.md yourself** — let the agent read its own instructions. This keeps sub-skill content out of the orchestrator's context.
 3. Pass any orchestrator context the agent needs (e.g., area resrefs from prior phases) in the prompt.
 4. When the agent completes, read `adventure-status.json` and `adventure.md` to check results.
