@@ -29,7 +29,7 @@ import { snapshotGitForUndo } from "../util/undo.js";
 import { compileScript, jsonToGff, erfPack } from "../nim-tools.js";
 import { checkPlacementWalkable } from "../util/walkmesh.js";
 import { getTilesetInfo } from "../util/tileset.js";
-import { generateLayout, groupHasDoors, groupHasCrossers, groupMatchesTerrain } from "../util/layout-generator.js";
+import { generateLayout, groupHasDoors, groupHasCrossers, groupMatchesTerrain, resolveFloorTerrain } from "../util/layout-generator.js";
 import type { LayoutStyle, SuggestedFeature } from "../util/layout-generator.js";
 import { solveArea } from "../util/zone-solver.js";
 import type { TerrainZone, CrosserPath, FeatureTile } from "../util/zone-solver.js";
@@ -638,23 +638,35 @@ export function registerAdventureTools(server: McpServer): void {
 
   server.tool(
     "adventure_list_features",
-    "List feature groups from a tileset that are compatible with the layout solver for a given floor terrain. Filters out groups with doors, crosser edges, or mismatched terrain corners — only returns groups safe to pass as preferredFeatures to adventure_generate_layout.",
+    "List feature groups from a tileset that are compatible with the layout solver. Automatically resolves the floor terrain from the style type (same logic as adventure_generate_layout), then filters out groups with doors, crosser edges, or mismatched terrain corners. Returns only groups safe to pass as preferredFeatures.",
     {
       tileset: z.string().describe("Tileset resref (e.g., 'ttr01', 'tdm01')"),
-      terrain: z.string().describe("Floor terrain name to match against (e.g., 'grass', 'floor', 'forest'). Groups whose tile corners don't all match this terrain are excluded."),
+      style: z.string().describe("Layout style type: dungeon, cave, dwelling, forest, rural, city, plains, desert, castle, tundra"),
     },
     { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
-    async ({ tileset: tilesetResref, terrain }) => {
+    async ({ tileset: tilesetResref, style }) => {
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
       const tilesetInfo = await getTilesetInfo(tilesetResref, resmanOpts, index);
+
+      const floorTerrain = resolveFloorTerrain(tilesetInfo, style);
+      if (!floorTerrain) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: `Cannot resolve floor terrain for style '${style}' on tileset '${tilesetResref}'`,
+            }),
+          }],
+        };
+      }
 
       const allowed = tilesetInfo.groups
         .filter(g =>
           g.tileIds.some(id => id >= 0) &&
           !groupHasDoors(g, tilesetInfo) &&
           !groupHasCrossers(g, tilesetInfo) &&
-          groupMatchesTerrain(g, tilesetInfo, terrain))
+          groupMatchesTerrain(g, tilesetInfo, floorTerrain))
         .map(g => ({ name: g.name, columns: g.columns, rows: g.rows }));
 
       return {
@@ -662,7 +674,8 @@ export function registerAdventureTools(server: McpServer): void {
           type: "text",
           text: JSON.stringify({
             tileset: tilesetResref,
-            terrain,
+            style,
+            floorTerrain,
             features: allowed,
             count: allowed.length,
           }, null, 2),

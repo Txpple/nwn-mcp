@@ -877,6 +877,17 @@ function computeTransitions(
 
 const IMPASSABLE_TERRAINS = new Set(["cliff", "pit", "chasm", "wall", "lava", "water", "rocky", "mountain"]);
 
+/** Resolve the floor terrain a style would use on this tileset.
+ *  Reuses the same logic as generateLayout so the result is authoritative. */
+export function resolveFloorTerrain(tileset: TilesetInfo, styleType: string): string | null {
+  const config = STYLE_PRESETS[styleType] ?? STYLE_PRESETS.dungeon;
+  const defaultTerrain = tileset.defaultTerrain.toLowerCase();
+  const validPairs = computeValidPairs(tileset);
+  const fromKeywords = findTerrainByName(tileset, config.floorKeywords);
+  return (fromKeywords && !IMPASSABLE_TERRAINS.has(fromKeywords) ? fromKeywords : null)
+    ?? findFloorTerrain(tileset, defaultTerrain, validPairs);
+}
+
 function findFloorTerrain(tileset: TilesetInfo, defaultTerrain: string, validPairs: Set<string>): string | null {
   const candidates = ["floor", "stone", "dirt", "sand", "grass", "wood"];
   for (const name of candidates) {

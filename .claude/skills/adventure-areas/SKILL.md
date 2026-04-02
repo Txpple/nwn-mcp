@@ -123,7 +123,7 @@ Propose area dimensions based on the plot's description of the location's scale:
 **Available styles:** `dungeon` (rooms + corridor crossers), `cave` (organic chambers + corridors), `dwelling` (quadrant rooms, building interior), `forest` (clearings in cliff/trees), `rural` (farmland clearings in trees), `city` (urban spaces), `plains` (open terrain, sparse clearings), `desert` (arid, cliff borders), `castle` (fortified exterior, castle walls), `tundra` (frozen, snow clearings).
 
 **MANDATORY: Choose thematic features BEFORE generating layouts.**
-1. Call `adventure_list_features` with the tileset resref and floor terrain (e.g., `terrain: "grass"` for rural, `terrain: "floor"` for dungeons/caves, `terrain: "forest"` for forest clearings). This returns ONLY groups that are safe for the solver — doors, crosser edges, and terrain-mismatched groups are already filtered out.
+1. Call `adventure_list_features` with the tileset resref and style type (e.g., `style: "rural"`, `style: "cave"`, `style: "forest"`). The tool automatically resolves the correct floor terrain and returns ONLY groups safe for the solver — doors, crosser edges, and terrain-mismatched groups are already filtered out.
 2. Read the plot description for this area — what should the player see? A farmstead needs farms, barns, wells. A graveyard needs graves, ruins, crypts. A military camp needs tents, weapons racks, fortifications.
 3. Pick 4-8 group names from the returned list that match the area's narrative purpose.
 4. Pass them as `preferredFeatures` in the style object. **Do NOT omit preferredFeatures** — without it the generator picks random groups and the area will feel incoherent (e.g., Dragon Skeletons in a peaceful farmstead, Evil Temples in a village square).
