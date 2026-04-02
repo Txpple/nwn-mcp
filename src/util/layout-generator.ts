@@ -379,7 +379,7 @@ export function generateLayout(
   }
 
   // ── 9. Transitions & description ─────────────────────────────────────────
-  const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections);
+  const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections, suggestedFeatures);
 
   const roomDescs = rooms.map((r, i) => `Room ${String.fromCharCode(65 + i)} (${r.w}x${r.h} at col=${r.x},row=${r.y})`);
   const corridorDescs = crossers.length > 0 ? ` ${crossers.length} corridors.` : "";
@@ -721,84 +721,70 @@ function packFeatures(
   const suggestions: SuggestedFeature[] = [];
   const occupied = new Set<string>();
 
-  // Build preferred set for fast lookup (case-insensitive)
-  const preferredSet = preferredFeatures
-    ? new Set(preferredFeatures.map(n => n.toLowerCase()))
-    : null;
+  // Ordered preferred list — preserves LLM rank order (best fit first).
+  // Only preferred features are placed; no random filler. One feature per room.
+  // Each preferred feature is used at most once before any repeats.
+  const preferredOrder = preferredFeatures ?? [];
+  const usedFeatures = new Set<string>();
 
   for (let i = 0; i < rooms.length; i++) {
     const room = rooms[i];
-    const roomArea = room.w * room.h;
-    let coveredTiles = 0;
 
     // Get all groups that have valid tile IDs, exclude groups with doors, crossers,
-    // or mismatched terrain corners, sorted largest first
+    // or mismatched terrain corners
     const validGroups = tileset.groups
       .filter(g => g.tileIds.some(id => id >= 0)
         && !groupHasDoors(g, tileset)
         && !groupHasCrossers(g, tileset)
-        && groupMatchesTerrain(g, tileset, floorTerrain))
-      .sort((a, b) => (b.columns * b.rows) - (a.columns * a.rows));
+        && groupMatchesTerrain(g, tileset, floorTerrain));
 
-    // If preferred features are specified, put them first; fall back to rest
-    const allCandidates = preferredSet
-      ? [
-          ...validGroups.filter(g => preferredSet.has(g.name.toLowerCase())),
-          ...validGroups.filter(g => !preferredSet.has(g.name.toLowerCase())),
-        ]
-      : validGroups;
+    // Try preferred features in LLM rank order, skipping already-used ones.
+    // If all are used, reset and allow repeats.
+    let placed = false;
+    for (let pass = 0; pass < 2 && !placed; pass++) {
+      if (pass === 1) usedFeatures.clear(); // allow repeats on second pass
+    for (const prefName of preferredOrder) {
+      if (usedFeatures.has(prefName.toLowerCase())) continue;
+      const group = validGroups.find(g => g.name.toLowerCase() === prefName.toLowerCase());
+      if (!group || group.columns > room.w || group.rows > room.h) continue;
 
-    // Keep placing features until 50% coverage or no more fit
-    while (coveredTiles < roomArea * 0.5) {
-      // Filter to groups that fit in remaining room space
-      const candidates = allCandidates.filter(g => g.columns <= room.w && g.rows <= room.h);
-      if (candidates.length === 0) break;
+      // Try multiple positions within the room
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const maxFx = room.x + room.w - group.columns;
+        const maxFy = room.y + room.h - group.rows;
+        const fx = room.x + Math.floor(Math.random() * (maxFx - room.x + 1));
+        const fy = room.y + Math.floor(Math.random() * (maxFy - room.y + 1));
 
-      let placed = false;
-      // Try candidates from a randomized subset (prefer larger)
-      const tryCount = Math.min(15, candidates.length);
-      const shuffled = candidates.slice(0, tryCount).sort(() => Math.random() - 0.5);
+        // Validate: within area bounds, not on perimeter
+        if (fx < 1 || fy < 1 || fx + group.columns > areaWidth - 1 || fy + group.rows > areaHeight - 1) continue;
 
-      for (const pick of shuffled) {
-        // Try multiple positions within the room
-        for (let attempt = 0; attempt < 10; attempt++) {
-          const maxFx = room.x + room.w - pick.columns;
-          const maxFy = room.y + room.h - pick.rows;
-          const fx = room.x + Math.floor(Math.random() * (maxFx - room.x + 1));
-          const fy = room.y + Math.floor(Math.random() * (maxFy - room.y + 1));
-
-          // Validate: within area bounds, not on perimeter
-          if (fx < 1 || fy < 1 || fx + pick.columns > areaWidth - 1 || fy + pick.rows > areaHeight - 1) continue;
-
-          // Check no overlap with already-placed features
-          let overlap = false;
-          for (let gx = fx; gx < fx + pick.columns && !overlap; gx++) {
-            for (let gy = fy; gy < fy + pick.rows && !overlap; gy++) {
-              if (occupied.has(`${gx},${gy}`)) overlap = true;
-            }
+        // Check no overlap with already-placed features
+        let overlap = false;
+        for (let gx = fx; gx < fx + group.columns && !overlap; gx++) {
+          for (let gy = fy; gy < fy + group.rows && !overlap; gy++) {
+            if (occupied.has(`${gx},${gy}`)) overlap = true;
           }
-          if (overlap) continue;
-
-          // Place it
-          for (let gx = fx; gx < fx + pick.columns; gx++) {
-            for (let gy = fy; gy < fy + pick.rows; gy++) {
-              occupied.add(`${gx},${gy}`);
-            }
-          }
-          coveredTiles += pick.columns * pick.rows;
-
-          suggestions.push({
-            feature: pick.name, x: fx, y: fy,
-            columns: pick.columns, rows: pick.rows, clearingIndex: i,
-          });
-          placed = true;
-          break; // placed this candidate, try next
         }
-        if (placed) break; // go back to while loop for next feature
-      }
+        if (overlap) continue;
 
-      if (!placed) break; // no candidates could be placed, stop
+        // Place it
+        for (let gx = fx; gx < fx + group.columns; gx++) {
+          for (let gy = fy; gy < fy + group.rows; gy++) {
+            occupied.add(`${gx},${gy}`);
+          }
+        }
+
+        suggestions.push({
+          feature: group.name, x: fx, y: fy,
+          columns: group.columns, rows: group.rows, clearingIndex: i,
+        });
+        usedFeatures.add(prefName.toLowerCase());
+        placed = true;
+        break;
+      }
+      if (placed) break; // one feature per room — move to next room
     }
+    } // end pass loop
   }
 
   return suggestions;
@@ -812,33 +798,72 @@ function computeTransitions(
   height: number,
   transitionCount?: number,
   transitionDirections?: string[],
+  features?: SuggestedFeature[],
 ): TransitionPoint[] {
   const count = transitionCount ?? 1;
   const directions = transitionDirections?.map(d => d.toLowerCase()) ??
     ["south", "north", "east", "west"].slice(0, count);
 
+  // Build set of tiles occupied by features — transitions must avoid these
+  const featureTiles = new Set<string>();
+  if (features) {
+    for (const f of features) {
+      for (let dx = 0; dx < f.columns; dx++) {
+        for (let dy = 0; dy < f.rows; dy++) {
+          featureTiles.add(`${f.x + dx},${f.y + dy}`);
+        }
+      }
+    }
+  }
+
   const points: TransitionPoint[] = [];
+  const usedRoomIndices = new Set<number>();
 
   for (const dir of directions) {
     if (points.length >= count) break;
 
-    let bestRoom = rooms[0];
-    let bestDist = Infinity;
-
-    for (const room of rooms) {
+    // Score each room: distance-to-edge for this direction
+    const scored: Array<{ room: Room; idx: number; edgeDist: number }> = [];
+    for (let i = 0; i < rooms.length; i++) {
+      const room = rooms[i];
       const cx = room.x + room.w / 2;
       const cy = room.y + room.h / 2;
-      let dist: number;
+      let edgeDist: number;
       switch (dir) {
-        case "north": dist = height - cy; break;
-        case "south": dist = cy; break;
-        case "east":  dist = width - cx; break;
-        case "west":  dist = cx; break;
-        default:      dist = Infinity;
+        case "north": edgeDist = height - cy; break;
+        case "south": edgeDist = cy; break;
+        case "east":  edgeDist = width - cx; break;
+        case "west":  edgeDist = cx; break;
+        default:      edgeDist = Infinity;
       }
-      if (dist < bestDist) { bestDist = dist; bestRoom = room; }
+      scored.push({ room, idx: i, edgeDist });
+    }
+    scored.sort((a, b) => a.edgeDist - b.edgeDist);
+
+    // When multiple transitions, maximize distance: prefer rooms not yet used.
+    // Among unused rooms, pick the one closest to the target edge.
+    // Fall back to used rooms only if all are taken.
+    let pick = scored.find(s => !usedRoomIndices.has(s.idx)) ?? scored[0];
+    // If we have prior transition points, among unused rooms pick the one
+    // that maximizes minimum Manhattan distance to all prior transition tiles
+    if (points.length > 0) {
+      const unused = scored.filter(s => !usedRoomIndices.has(s.idx));
+      const candidates = unused.length > 0 ? unused : scored;
+      // Only consider rooms reasonably close to the target edge (top 50%)
+      const eligible = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * 0.5)));
+      let bestMinDist = -1;
+      for (const s of eligible) {
+        const cx = s.room.x + Math.floor(s.room.w / 2);
+        const cy = s.room.y + Math.floor(s.room.h / 2);
+        const minDist = Math.min(...points.map(p => Math.abs(p.tileCol - cx) + Math.abs(p.tileRow - cy)));
+        if (minDist > bestMinDist) { bestMinDist = minDist; pick = s; }
+      }
     }
 
+    const bestRoom = pick.room;
+    usedRoomIndices.add(pick.idx);
+
+    // Pick transition tile on the room's edge closest to the map boundary
     let tileCol: number, tileRow: number;
     switch (dir) {
       case "north":
@@ -859,6 +884,30 @@ function computeTransitions(
         break;
       default:
         continue;
+    }
+
+    // If the chosen tile is occupied by a feature, scan along the room edge
+    // for a free tile. Try alternating offsets ±1, ±2, etc.
+    if (featureTiles.has(`${tileCol},${tileRow}`)) {
+      const isVerticalEdge = dir === "east" || dir === "west";
+      const edgeLen = isVerticalEdge ? bestRoom.h : bestRoom.w;
+      let found = false;
+      for (let offset = 1; offset < edgeLen; offset++) {
+        for (const sign of [1, -1]) {
+          const tc = isVerticalEdge ? tileCol : tileCol + offset * sign;
+          const tr = isVerticalEdge ? tileRow + offset * sign : tileRow;
+          // Stay within room bounds
+          if (tc < bestRoom.x || tc >= bestRoom.x + bestRoom.w) continue;
+          if (tr < bestRoom.y || tr >= bestRoom.y + bestRoom.h) continue;
+          if (!featureTiles.has(`${tc},${tr}`)) {
+            tileCol = tc;
+            tileRow = tr;
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
     }
 
     points.push({

@@ -362,12 +362,20 @@ export function registerAdventureTools(server: McpServer): void {
         return da - db;
       });
 
+      // Collect ALL walkable candidates, then sort by Z descending (prefer
+      // higher ground — avoids returning depressed terrain like tree roots
+      // when clearings at Z~0 are also available in the region)
+      const allWalkable: Array<{ x: number; y: number; z: number }> = [];
       for (const { x, y } of candidates) {
-        if (positions.length >= maxCount) break;
         const check = await checkPlacementWalkable(x, y, area.toLowerCase(), index, resmanOpts);
         if (check.ok) {
-          positions.push({ x, y, z: check.z ?? 0 });
+          allWalkable.push({ x, y, z: check.z ?? 0 });
         }
+      }
+      allWalkable.sort((a, b) => b.z - a.z);
+      for (const pos of allWalkable) {
+        if (positions.length >= maxCount) break;
+        positions.push(pos);
       }
 
       if (positions.length === 0) {

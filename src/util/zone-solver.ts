@@ -187,9 +187,6 @@ export function buildCrosserGrid(
   }
 
   // Helper: check if a tile has ANY non-default corner (boundary, floor, or room tile).
-  // Crossers should NOT propagate onto these tiles — corridor crossers are explicitly
-  // set by the path and don't need propagation.  Propagating onto boundary tiles
-  // creates unsolvable corner+crosser combos (the old stripping bug).
   const cw = width + 1;
   const hasNonDefaultCorner = (x: number, y: number): boolean => {
     if (!cornerGrid || !defaultTerrain) return false;
@@ -197,14 +194,30 @@ export function buildCrosserGrid(
     const br = cornerGrid[y * cw + x + 1];
     const tl = cornerGrid[(y + 1) * cw + x];
     const tr = cornerGrid[(y + 1) * cw + x + 1];
-    // Any non-default corner means this is a room or boundary tile
     return bl !== defaultTerrain || br !== defaultTerrain || tl !== defaultTerrain || tr !== defaultTerrain;
   };
 
-  // Propagate crossers across shared edges so the user doesn't have to
-  // specify both sides of every edge.  Skip propagation onto tiles with
-  // any non-default corner (room interiors and boundary tiles) — these
-  // get their crossers explicitly from the corridor path, not propagation.
+  // Strip crosser edges from tiles with non-default corners.
+  // Corridor tiles adjacent to rooms share corner positions with room tiles,
+  // inheriting floor corners. Most tilesets lack tiles with mixed floor corners
+  // + corridor crossers (e.g., tdm01 has no 2-adjacent-floor + corridor tile).
+  // Stripping crossers from these edge tiles lets them solve as regular
+  // transition tiles, while pure-wall corridor tiles keep their crossers.
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (hasNonDefaultCorner(x, y)) {
+        const entry = grid[y * width + x];
+        entry.top = "";
+        entry.right = "";
+        entry.bottom = "";
+        entry.left = "";
+      }
+    }
+  }
+
+  // Propagate crossers across shared edges between default-corner tiles only.
+  // Never propagate onto tiles with non-default corners — those had their
+  // crossers stripped above and shouldn't get new ones.
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
@@ -212,14 +225,20 @@ export function buildCrosserGrid(
       // Propagate right ↔ left
       if (x + 1 < width) {
         const neighbor = grid[idx + 1];
-        if (e.right && !neighbor.left && !hasNonDefaultCorner(x + 1, y)) neighbor.left = e.right;
-        else if (neighbor.left && !e.right && !hasNonDefaultCorner(x, y)) e.right = neighbor.left;
+        if (e.right && !neighbor.left && !hasNonDefaultCorner(x + 1, y)) {
+          neighbor.left = e.right;
+        } else if (neighbor.left && !e.right && !hasNonDefaultCorner(x, y)) {
+          e.right = neighbor.left;
+        }
       }
       // Propagate top ↔ bottom
       if (y + 1 < height) {
         const neighbor = grid[(y + 1) * width + x];
-        if (e.top && !neighbor.bottom && !hasNonDefaultCorner(x, y + 1)) neighbor.bottom = e.top;
-        else if (neighbor.bottom && !e.top && !hasNonDefaultCorner(x, y)) e.top = neighbor.bottom;
+        if (e.top && !neighbor.bottom && !hasNonDefaultCorner(x, y + 1)) {
+          neighbor.bottom = e.top;
+        } else if (neighbor.bottom && !e.top && !hasNonDefaultCorner(x, y)) {
+          e.top = neighbor.bottom;
+        }
       }
     }
   }
