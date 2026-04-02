@@ -114,15 +114,17 @@ Pick the best match based on:
 ### Phase 3: Dimensions + Layout Plan
 
 Propose area dimensions based on the plot's description of the location's scale:
-- Small focused area: 8x8 to 10x10
-- Medium area: 12x12 to 14x14
-- Large exploration area: 16x16 to 18x18
+- Small focused area: 10x10 to 12x12
+- Medium area: 14x14 to 16x16
+- Large exploration area: 18x18 to 24x24
 
 **Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road).
 
+**Before calling `adventure_generate_layout`, call `get_tileset_details`** (summary mode) to see the available groups. Choose features that match the plot description for this area and pass them as `preferredFeatures` in the style object. The generator will prioritize these groups when packing features into rooms, falling back to random selection only if preferred features don't fit.
+
 ```
-adventure_generate_layout(tileset="tdc01", width="10", height="10",
-  style='{"type":"dungeon","rooms":3,"corridorStyle":"straight"}',
+adventure_generate_layout(tileset="ttr01", width="12", height="12",
+  style='{"type":"rural","rooms":4,"corridorStyle":"straight","preferredFeatures":["Farm 1 2x2","Barn 1 2x2","Field 1 2x2","Well"]}',
   transitionCount="2", transitionDirections='["south","north"]')
 ```
 
@@ -130,7 +132,7 @@ The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass d
 
 **Fallback:** If `adventure_generate_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
 
-Only call `get_tileset_details` if you need specific group names for `paint_group`. Use `detail="summary"` (the default) for a compact ~2KB overview with terrain adjacencies — only use `detail="full"` if you need the complete tile catalog.
+**Always call `get_tileset_details`** (summary mode) before generating layouts — you need the group names for `preferredFeatures` and terrain adjacency info for layout planning.
 
 ---
 

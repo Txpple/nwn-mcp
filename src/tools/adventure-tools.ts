@@ -406,9 +406,9 @@ export function registerAdventureTools(server: McpServer): void {
     "Generate a procedural area layout with terrain zones, crosser paths, and transition points. Returns data ready to pass to adventure_apply_layout. Encodes all layout rules: perimeter encapsulation, room separation, adjacency validation, walkable ratio. Styles: dungeon (varied rooms + corridors, some L-shapes), cave (smaller rooms, more corridors, maze-like), dwelling (quadrant rooms, fewer corridors, building interior), forest (clearings separated by trees, winding roads), rural (farmland/village, spine roads), city (urban cobblestone, grid roads), plains (open terrain, sparse clearings), desert (arid, cliff borders), castle (fortified exterior, castle walls), tundra (frozen, snow/camp clearings). Returns suggestedFeatures array with pre-validated feature placements.",
     {
       tileset: z.string().describe("Tileset resref (e.g., 'tdc01' for crypt, 'ttf01' for forest)"),
-      width: z.string().describe("Area width in tiles (8-18)"),
-      height: z.string().describe("Area height in tiles (8-18)"),
-      style: z.string().describe("JSON style object: {type: 'dungeon'|'cave'|'dwelling'|'forest'|'rural'|'city'|'plains'|'desert'|'castle'|'tundra', rooms?: number, clearings?: number, corridorStyle?: 'straight'|'zigzag', roadStyle?: 'spine'|'grid'|'winding'}"),
+      width: z.string().describe("Area width in tiles (8-32)"),
+      height: z.string().describe("Area height in tiles (8-32)"),
+      style: z.string().describe("JSON style object: {type: 'dungeon'|'cave'|'dwelling'|'forest'|'rural'|'city'|'plains'|'desert'|'castle'|'tundra', rooms?: number, clearings?: number, corridorStyle?: 'straight'|'zigzag', roadStyle?: 'spine'|'grid'|'winding', preferredFeatures?: string[]} — preferredFeatures is an array of tileset group names (from get_tileset_details) to prioritize when placing features. Preferred groups are tried first before falling back to random selection."),
       transitionCount: z.string().optional().describe("Number of transition points to generate (default 1)"),
       transitionDirections: z.string().optional().describe("JSON array of directions: ['south', 'north', 'east', 'west']"),
     },
@@ -510,6 +510,50 @@ export function registerAdventureTools(server: McpServer): void {
         if (!group) {
           featureWarnings.push(`Group not found: ${sf.feature}`);
           continue;
+        }
+        // Reject groups that contain door tiles — doors require manual placement and break layout
+        const hasDoors = group.tileIds.some(id => id >= 0 && tileset.tiles[id]?.doors > 0);
+        if (hasDoors) {
+          featureWarnings.push(`${sf.feature}: skipped (contains door tiles — use place_door instead)`);
+          continue;
+        }
+        // Reject groups that contain crosser references — crossers on feature tiles
+        // conflict with the solver's crosser grid and create edge mismatches
+        const hasCrossers = group.tileIds.some(id => {
+          if (id < 0) return false;
+          const t = tileset.tiles[id];
+          return t && !!(t.crossers.top || t.crossers.right || t.crossers.bottom || t.crossers.left);
+        });
+        if (hasCrossers) {
+          featureWarnings.push(`${sf.feature}: skipped (contains crosser tiles — causes edge mismatches)`);
+          continue;
+        }
+        // Reject groups whose tile corners don't match the surrounding zone terrain.
+        // Look up what terrain the zone solver will paint at this position.
+        const featureZoneTerrain = (() => {
+          // Last zone covering this position wins (zones apply in order)
+          let terrain = "";
+          for (const z of zones) {
+            if (z.tiles.some((t: { x: number; y: number }) => t.x === sf.x && t.y === sf.y)) {
+              terrain = z.terrain.toLowerCase();
+            }
+          }
+          return terrain;
+        })();
+        if (featureZoneTerrain) {
+          const terrainMismatch = group.tileIds.some(id => {
+            if (id < 0) return false;
+            const t = tileset.tiles[id];
+            if (!t) return false;
+            return t.corners.topLeft.toLowerCase() !== featureZoneTerrain ||
+                   t.corners.topRight.toLowerCase() !== featureZoneTerrain ||
+                   t.corners.bottomLeft.toLowerCase() !== featureZoneTerrain ||
+                   t.corners.bottomRight.toLowerCase() !== featureZoneTerrain;
+          });
+          if (terrainMismatch) {
+            featureWarnings.push(`${sf.feature}: skipped (tile corners don't match zone terrain '${featureZoneTerrain}')`);
+            continue;
+          }
         }
         // Validate dimensions match
         if (sf.columns !== group.columns || sf.rows !== group.rows) {

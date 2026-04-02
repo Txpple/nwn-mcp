@@ -25,6 +25,7 @@ export interface LayoutStyle {
   rooms?: number;          // number of rooms/clearings (default 3)
   clearings?: number;      // alias for rooms (backward compat)
   corridorStyle?: "straight" | "zigzag";
+  preferredFeatures?: string[];  // group names to prefer (e.g., ["Farm 1 2x2", "Barn 1 2x2"])
 }
 
 export interface TransitionPoint {
@@ -278,7 +279,7 @@ export function generateLayout(
   }
 
   // ── 6. Feature packing (mandatory — 50%+ coverage per room) ──────────────
-  const suggestedFeatures = packFeatures(rooms, tileset, width, height);
+  const suggestedFeatures = packFeatures(rooms, tileset, width, height, floorTerrain, style.preferredFeatures);
 
   // ── 7. Room connections ───────────────────────────────────────────────────
   // Exterior styles (wallKeywords set): connect with floor terrain corridors
@@ -392,13 +393,18 @@ export function generateLayout(
 
 function bspPartition(x: number, y: number, w: number, h: number,
                       targetRooms: number, config: StyleConfig): Room[] {
-  const minLeaf = 5;
+  // Minimum leaf = 4 tiles (allows 3-tile room + 1 margin on each side when margin=1,
+  // or fits a 3-tile room with margin=0 on one side). This lets a 10x10 area (8x8 playable)
+  // split into 4 rooms instead of 1.
+  const minLeaf = 4;
   const canSplitH = h >= minLeaf * 2;
   const canSplitW = w >= minLeaf * 2;
 
   if (targetRooms <= 1 || (!canSplitH && !canSplitW)) {
     const [minM, maxM] = config.marginRange;
-    const margin = Math.max(2, minM + Math.floor(Math.random() * (maxM - minM + 1)));
+    // Use margin of 1 when leaf is tight (< 8 tiles), normal margin otherwise
+    const tightLeaf = w < 8 || h < 8;
+    const margin = tightLeaf ? 1 : Math.max(2, minM + Math.floor(Math.random() * (maxM - minM + 1)));
     const availW = Math.max(3, w - margin * 2);
     const availH = Math.max(3, h - margin * 2);
     const sizeFrac = config.roomSizeRange[0] +
@@ -672,22 +678,75 @@ function connectRoomsWinding(a: Room, b: Room, crosserType: string, curvature: n
 
 // ─── Feature packing (mandatory — 50%+ tile coverage per room) ──────────────
 
+function groupHasDoors(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
+  for (const tileId of group.tileIds) {
+    if (tileId < 0) continue;
+    const tile = tileset.tiles[tileId];
+    if (tile && tile.doors > 0) return true;
+  }
+  return false;
+}
+
+function groupHasCrossers(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
+  for (const tileId of group.tileIds) {
+    if (tileId < 0) continue;
+    const tile = tileset.tiles[tileId];
+    if (tile && (tile.crossers.top || tile.crossers.right || tile.crossers.bottom || tile.crossers.left)) return true;
+  }
+  return false;
+}
+
+/** Check that ALL corners of ALL tiles in a group match the given terrain.
+ *  Features with mismatched corners create visual seams and force solver fallbacks. */
+function groupMatchesTerrain(group: { tileIds: number[] }, tileset: TilesetInfo, terrain: string): boolean {
+  const lc = terrain.toLowerCase();
+  for (const tileId of group.tileIds) {
+    if (tileId < 0) continue;
+    const tile = tileset.tiles[tileId];
+    if (!tile) continue;
+    if (tile.corners.topLeft.toLowerCase() !== lc ||
+        tile.corners.topRight.toLowerCase() !== lc ||
+        tile.corners.bottomLeft.toLowerCase() !== lc ||
+        tile.corners.bottomRight.toLowerCase() !== lc) return false;
+  }
+  return true;
+}
+
 function packFeatures(
   rooms: Room[], tileset: TilesetInfo,
   areaWidth: number, areaHeight: number,
+  floorTerrain: string,
+  preferredFeatures?: string[],
 ): SuggestedFeature[] {
   const suggestions: SuggestedFeature[] = [];
   const occupied = new Set<string>();
+
+  // Build preferred set for fast lookup (case-insensitive)
+  const preferredSet = preferredFeatures
+    ? new Set(preferredFeatures.map(n => n.toLowerCase()))
+    : null;
 
   for (let i = 0; i < rooms.length; i++) {
     const room = rooms[i];
     const roomArea = room.w * room.h;
     let coveredTiles = 0;
 
-    // Get all groups that have valid tile IDs, sorted largest first
-    const allCandidates = tileset.groups
-      .filter(g => g.tileIds.some(id => id >= 0))
+    // Get all groups that have valid tile IDs, exclude groups with doors, crossers,
+    // or mismatched terrain corners, sorted largest first
+    const validGroups = tileset.groups
+      .filter(g => g.tileIds.some(id => id >= 0)
+        && !groupHasDoors(g, tileset)
+        && !groupHasCrossers(g, tileset)
+        && groupMatchesTerrain(g, tileset, floorTerrain))
       .sort((a, b) => (b.columns * b.rows) - (a.columns * a.rows));
+
+    // If preferred features are specified, put them first; fall back to rest
+    const allCandidates = preferredSet
+      ? [
+          ...validGroups.filter(g => preferredSet.has(g.name.toLowerCase())),
+          ...validGroups.filter(g => !preferredSet.has(g.name.toLowerCase())),
+        ]
+      : validGroups;
 
     // Keep placing features until 50% coverage or no more fit
     while (coveredTiles < roomArea * 0.5) {

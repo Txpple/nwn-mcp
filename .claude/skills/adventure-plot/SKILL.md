@@ -86,7 +86,7 @@ What is at stake? Set the scene and establish the central conflict.]
 - **Type:** [interior / exterior]
 - **Environment:** [terrain/biome keywords — forest, crypt, village, cave, castle, swamp, etc.]
 - **Mood:** [eerie / bustling / oppressive / serene / tense / foreboding]
-- **Scale:** [small (4x4-6x6) / medium (6x6-8x8) / large (8x8-12x12)]
+- **Scale:** [small / medium / large — abstract size hint, the areas skill determines actual tile dimensions]
 - **Description:** [What does this area look like spatially? Key landmarks, terrain features,
   notable structures. Think about what the player sees and navigates.]
 - **Role in Story:** [Why does this location matter? What happens here plot-wise?]

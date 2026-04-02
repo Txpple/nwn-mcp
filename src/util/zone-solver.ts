@@ -275,8 +275,14 @@ export function findTileByCorners(
 /**
  * Solve the entire area tile grid from zones + crosser paths.
  *
- * Feature tiles are preserved (never overwritten). All other tiles are
- * resolved from the corner grid + crosser grid by exact tileset lookup.
+ * Solves in scan order (y=0→H-1, x=0→W-1).  When a tile's 4-corner combo
+ * has no matching tileset tile, the solver adjusts only "free" corners —
+ * those not yet consumed by already-solved neighbors — and writes the
+ * adjustment back to the corner grid so downstream tiles see the change.
+ *
+ * This guarantees adjacent placed tiles always share matching corner terrains.
+ *
+ * Feature tiles are preserved (never overwritten).
  */
 export function solveArea(
   width: number,
@@ -295,13 +301,18 @@ export function solveArea(
   const cornerGrid = buildCornerGrid(width, height, lcDefault, lcZones, features, tileset);
   const crosserGrid = buildCrosserGrid(width, height, lcCrossers, cornerGrid, lcDefault);
 
-  // Collect only terrains that actually appear in the corner grid.
-  // fallbackSubstitute must never inject terrains outside this set.
-  const allowedTerrains = new Set<string>();
-  for (const t of cornerGrid) allowedTerrains.add(t);
-
   const cw = width + 1;
-  const cornerAt = (cx: number, cy: number) => cornerGrid[cy * cw + cx];
+  const cornerIdx = (cx: number, cy: number) => cy * cw + cx;
+  const cornerAt = (cx: number, cy: number) => cornerGrid[cornerIdx(cx, cy)];
+
+  // Collect only terrains that actually appear in the corner grid.
+  const allowedTerrains: string[] = [];
+  {
+    const seen = new Set<string>();
+    for (const t of cornerGrid) {
+      if (!seen.has(t)) { seen.add(t); allowedTerrains.push(t); }
+    }
+  }
 
   // ── Pre-solve adjacency validation ──────────────────────────────────
   const validPairs = computeValidPairs(tileset);
@@ -351,15 +362,34 @@ export function solveArea(
     featureSet.add(f.y * width + f.x);
   }
 
+  // Track which corner grid points are locked by feature tiles
+  const featureLockedCorners = new Set<number>();
+  for (const f of features) {
+    const tile = tileset.tiles[f.tileId];
+    if (!tile) continue;
+    featureLockedCorners.add(cornerIdx(f.x, f.y));
+    featureLockedCorners.add(cornerIdx(f.x + 1, f.y));
+    featureLockedCorners.add(cornerIdx(f.x, f.y + 1));
+    featureLockedCorners.add(cornerIdx(f.x + 1, f.y + 1));
+  }
+
   const placements: ZoneSolverResult["placements"] = [];
   const warnings: ZoneSolverResult["warnings"] = [];
+  const noCrossers: CrosserEdges = { top: "", right: "", bottom: "", left: "" };
+
+  // ── Solve in scan order (bottom-to-top, left-to-right) ──────────────
+  // For tile (x, y), already-solved neighbors constrain shared corners:
+  //   BL = corner(x,   y  ): locked if x>0 OR y>0 (shared with left/below)
+  //   BR = corner(x+1, y  ): locked if y>0 (shared with tile below-right)
+  //   TL = corner(x,   y+1): locked if x>0 (shared with tile to left)
+  //   TR = corner(x+1, y+1): always free (no solved tile uses it yet)
+  // Free corners can be adjusted to find a valid tile; the adjustment is
+  // written back to cornerGrid so future tiles see the updated value.
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-
       // Skip feature tiles
-      if (featureSet.has(idx)) continue;
+      if (featureSet.has(y * width + x)) continue;
 
       const wantCorners = {
         tl: cornerAt(x, y + 1),
@@ -367,114 +397,82 @@ export function solveArea(
         bl: cornerAt(x, y),
         br: cornerAt(x + 1, y),
       };
-      const wantCrossers = crosserGrid[idx];
+      const wantCrossers = crosserGrid[y * width + x];
+      const hasCrs = !!(wantCrossers.top || wantCrossers.right || wantCrossers.bottom || wantCrossers.left);
 
+      // Step 1: exact corners + exact crossers
       let placement = findTileByCorners(wantCorners, wantCrossers, tileset);
+      let warnMsg = "";
 
+      // Step 2: exact corners + no crossers
       if (!placement) {
-        const hasCrossers = wantCrossers.top || wantCrossers.right || wantCrossers.bottom || wantCrossers.left;
-        if (hasCrossers) {
-          const noCrossers = { top: "", right: "", bottom: "", left: "" };
-          const allSameCorner = wantCorners.tl === wantCorners.tr &&
-                                wantCorners.tr === wantCorners.bl &&
-                                wantCorners.bl === wantCorners.br;
+        placement = findTileByCorners(wantCorners, noCrossers, tileset);
+        if (placement && hasCrs) warnMsg = "Dropped crossers (corners preserved)";
+      }
 
-          if (allSameCorner) {
-            // Uniform corners (e.g., all-Floor room tile).  Drop crossers
-            // to preserve terrain — the crosser was likely propagated or
-            // extended from an adjacent corridor, and no matching tile
-            // with this uniform corner pattern + crosser exists.
-            placement = findTileByCorners(wantCorners, noCrossers, tileset);
-            if (placement) {
-              warnings.push({ x, y, message: `No tile for corners+crossers; dropped crossers` });
-            }
-            // If still no match, try substituting corners with crossers
-            if (!placement) {
-              placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
+      // Step 3: adjust free corners + no crossers
+      if (!placement) {
+        // Determine which corners are free to adjust
+        const adjustable = getFreeCorners(x, y, cw, featureLockedCorners);
+
+        if (adjustable.length > 0) {
+          // Try adjusting 1 corner
+          for (const adj of adjustable) {
+            for (const terrain of allowedTerrains) {
+              if (terrain === wantCorners[adj.key]) continue;
+              const modified = { ...wantCorners, [adj.key]: terrain };
+              placement = findTileByCorners(modified, noCrossers, tileset);
               if (placement) {
-                warnings.push({ x, y, message: `Substituted corners to preserve crossers (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
+                cornerGrid[adj.gridIdx] = terrain;
+                warnMsg = `Adjusted ${adj.key}: ${wantCorners[adj.key]}→${terrain}`;
+                if (hasCrs) warnMsg += " + crossers dropped";
+                break;
               }
             }
-          } else {
-            // Mixed corners (e.g., terrain boundary with crosser).
-            // Priority: preserve crossers (doorway/corridor connections)
-            // over plain terrain transitions.  Crossers represent explicit
-            // corridor paths that connect rooms — losing them breaks
-            // connectivity.  Corner substitution for a doorway tile is
-            // preferable to dropping the crosser entirely.
+            if (placement) break;
+          }
 
-            const edges: Array<"top" | "right" | "bottom" | "left"> = ["top", "right", "bottom", "left"];
-            const activeEdges = edges.filter(e => wantCrossers[e]);
-
-            // 1. Exact corners + partial crossers
-            if (activeEdges.length > 1) {
-              for (const edge of activeEdges) {
-                const partial: CrosserEdges = { top: "", right: "", bottom: "", left: "" };
-                partial[edge] = wantCrossers[edge];
-                placement = findTileByCorners(wantCorners, partial, tileset);
-                if (placement) {
-                  warnings.push({ x, y, message: `Partial crossers (kept ${edge})` });
-                  break;
+          // Try adjusting 2 corners
+          if (!placement && adjustable.length >= 2) {
+            let found = false;
+            for (let i = 0; i < adjustable.length && !found; i++) {
+              for (let j = i + 1; j < adjustable.length && !found; j++) {
+                for (const t1 of allowedTerrains) {
+                  for (const t2 of allowedTerrains) {
+                    if (t1 === wantCorners[adjustable[i].key] && t2 === wantCorners[adjustable[j].key]) continue;
+                    const modified = { ...wantCorners, [adjustable[i].key]: t1, [adjustable[j].key]: t2 };
+                    placement = findTileByCorners(modified, noCrossers, tileset);
+                    if (placement) {
+                      cornerGrid[adjustable[i].gridIdx] = t1;
+                      cornerGrid[adjustable[j].gridIdx] = t2;
+                      warnMsg = `Adjusted ${adjustable[i].key}→${t1}, ${adjustable[j].key}→${t2}`;
+                      if (hasCrs) warnMsg += " + crossers dropped";
+                      found = true;
+                      break;
+                    }
+                  }
+                  if (found) break;
                 }
-              }
-            }
-
-            // 2. Corner substitution + crossers (doorway tiles)
-            if (!placement) {
-              placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
-              if (placement) {
-                warnings.push({ x, y, message: `Substituted corners to preserve crossers (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
-              }
-            }
-            if (!placement && activeEdges.length > 1) {
-              for (const edge of activeEdges) {
-                const partial: CrosserEdges = { top: "", right: "", bottom: "", left: "" };
-                partial[edge] = wantCrossers[edge];
-                placement = fallbackSubstitute(wantCorners, partial, allowedTerrains, tileset);
-                if (placement) {
-                  warnings.push({ x, y, message: `Substituted corners + partial crossers (kept ${edge})` });
-                  break;
-                }
-              }
-            }
-
-            // 3. Last resort: drop crossers, keep exact corners
-            if (!placement) {
-              placement = findTileByCorners(wantCorners, noCrossers, tileset);
-              if (placement) {
-                warnings.push({ x, y, message: `No tile for corners+crossers; dropped crossers` });
               }
             }
           }
         }
       }
 
+      // Step 4: ultimate fallback — all default terrain, no crossers
       if (!placement) {
-        // Fallback 3: try substituting corners without crossers
-        placement = fallbackSubstitute(wantCorners, wantCrossers, allowedTerrains, tileset);
-        if (!placement) {
-          const noCrossers = { top: "", right: "", bottom: "", left: "" };
-          placement = fallbackSubstitute(wantCorners, noCrossers, allowedTerrains, tileset);
-        }
-        if (placement) {
-          warnings.push({ x, y, message: `Corner combo not in tileset; substituted corners (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
-        }
-      }
-
-      if (!placement) {
-        // Ultimate fallback: all default terrain, no crossers
         placement = findTileByCorners(
           { tl: lcDefault, tr: lcDefault, bl: lcDefault, br: lcDefault },
-          { top: "", right: "", bottom: "", left: "" },
-          tileset,
+          noCrossers, tileset,
         );
         if (placement) {
-          warnings.push({ x, y, message: `No compatible transition tile using zone-defined terrains; fell back to default terrain '${lcDefault}' (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})` });
+          warnMsg = `No valid tile for zone corners; fell back to default terrain '${lcDefault}' (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})`;
         }
       }
 
       if (placement) {
         placements.push({ x, y, tileId: placement.tileId, orientation: placement.orientation });
+        if (warnMsg) warnings.push({ x, y, message: warnMsg });
       } else {
         warnings.push({ x, y, message: `No tile found at all — this should never happen if the tileset has a default tile` });
       }
@@ -488,64 +486,48 @@ export function solveArea(
   return { placements, warnings };
 }
 
-// ─── Fallback ───────────────────────────────────────────────────────────────
+// ─── Scan-order corner helpers ─────────────────────────────────────────────
+
+interface FreeCorner {
+  key: "tl" | "tr" | "bl" | "br";
+  gridIdx: number;
+}
 
 /**
- * Try substituting corners to find a tile match, preferring fewest changes.
- * Tries the defaultTerrain first, then each terrain present in the corners
- * (handles cases like Bridge-over-Pit where Floor corners need to become Pit).
+ * Determine which corners of tile (x,y) are free to adjust in scan order.
+ * A corner is "free" if no already-solved tile (left or below) shares it
+ * and it's not locked by a feature tile.
  */
-function fallbackSubstitute(
-  corners: { tl: string; tr: string; bl: string; br: string },
-  crossers: CrosserEdges,
-  allowedTerrains: Set<string>,
-  tileset: TilesetInfo,
-): TilePlacement | null {
-  const keys: Array<"tl" | "tr" | "bl" | "br"> = ["tl", "tr", "bl", "br"];
+function getFreeCorners(
+  x: number, y: number, cw: number,
+  featureLocked: Set<number>,
+): FreeCorner[] {
+  const idx = (cx: number, cy: number) => cy * cw + cx;
+  const result: FreeCorner[] = [];
 
-  // Only try terrains that appear in the corner grid (zone-defined + default).
-  // Never inject a terrain that wasn't requested in the zone definitions.
-  const terrainsToTry = [...allowedTerrains];
+  // TR = corner(x+1, y+1): always free (no solved tile uses it yet)
+  const trIdx = idx(x + 1, y + 1);
+  if (!featureLocked.has(trIdx)) result.push({ key: "tr", gridIdx: trIdx });
 
-  for (const subTerrain of terrainsToTry) {
-    // Try substituting 1 corner
-    for (const key of keys) {
-      if (corners[key] === subTerrain) continue;
-      const modified = { ...corners, [key]: subTerrain };
-      const result = findTileByCorners(modified, crossers, tileset);
-      if (result) return result;
-    }
-
-    // Try substituting 2 corners
-    for (let i = 0; i < keys.length; i++) {
-      for (let j = i + 1; j < keys.length; j++) {
-        if (corners[keys[i]] === subTerrain && corners[keys[j]] === subTerrain) continue;
-        const modified = { ...corners, [keys[i]]: subTerrain, [keys[j]]: subTerrain };
-        const result = findTileByCorners(modified, crossers, tileset);
-        if (result) return result;
-      }
-    }
-
-    // Try substituting 3 corners
-    for (let skip = 0; skip < keys.length; skip++) {
-      const modified = { ...corners };
-      for (let i = 0; i < keys.length; i++) {
-        if (i !== skip) modified[keys[i]] = subTerrain;
-      }
-      const result = findTileByCorners(modified, crossers, tileset);
-      if (result) return result;
-    }
-
-    // Try all 4 corners to this terrain
-    const allSame = { tl: subTerrain, tr: subTerrain, bl: subTerrain, br: subTerrain };
-    if (allSame.tl !== corners.tl || allSame.tr !== corners.tr ||
-        allSame.bl !== corners.bl || allSame.br !== corners.br) {
-      const result = findTileByCorners(allSame, crossers, tileset);
-      if (result) return result;
-    }
+  // TL = corner(x, y+1): free if x=0 (no left neighbor in this row)
+  if (x === 0) {
+    const tlIdx = idx(x, y + 1);
+    if (!featureLocked.has(tlIdx)) result.push({ key: "tl", gridIdx: tlIdx });
   }
 
-  return null;
+  // BR = corner(x+1, y): free if y=0 (no tile below)
+  if (y === 0) {
+    const brIdx = idx(x + 1, y);
+    if (!featureLocked.has(brIdx)) result.push({ key: "br", gridIdx: brIdx });
+  }
+
+  // BL = corner(x, y): free if x=0 AND y=0 (first tile only)
+  if (x === 0 && y === 0) {
+    const blIdx = idx(x, y);
+    if (!featureLocked.has(blIdx)) result.push({ key: "bl", gridIdx: blIdx });
+  }
+
+  return result;
 }
 
 // ─── Crosser Validation ─────────────────────────────────────────────────────

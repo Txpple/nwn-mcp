@@ -99,8 +99,9 @@ All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets
 - **Interior corridors use crossers** (corridor type only, on wall tiles). **Exterior corridors carve floor terrain zones** through wall terrain — no crosser paths.
 - **Crosser type**: use `corridor` (self-contained per tile). Never use `doorway` — doorway crossers require matched pairs on shared edges (arch geometry split between adjacent tiles).
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
-- **Solver fallback priority for uniform corners** (all-floor room tiles): drop crossers first (preserve floor), then try corner substitution. For mixed corners (wall-floor boundaries): try corner substitution to preserve crossers first, then drop.
-- **Feature suggestions**: `suggestedFeatures` array in LayoutResult — packed into rooms targeting 50%+ tile coverage. `adventure_apply_layout` applies zones + crossers + features atomically.
+- **Solver scan-order**: solves bottom-to-top, left-to-right. When a tile's 4-corner combo has no tile, only adjusts corners not yet consumed by solved neighbors (TR always free, TL free at x=0, BR free at y=0). Adjustments are written back to the corner grid so downstream tiles see them — no unilateral corner substitution.
+- **Feature group filters**: groups with door tiles, crosser edges, or mismatched terrain corners are excluded from feature packing and `adventure_apply_layout`. Door geometry and crosser edges on feature tiles conflict with the solver's grids. Terrain mismatch means a feature tile's corners don't all match the room's floor terrain — placing such a feature locks foreign corners into the grid, creating visual seams and forcing solver fallbacks on neighboring tiles.
+- **Feature suggestions**: `suggestedFeatures` array in LayoutResult — packed into rooms targeting 50%+ tile coverage. `adventure_apply_layout` applies zones + crossers + features atomically. Pass `preferredFeatures` (array of group names from `get_tileset_details`) in `LayoutStyle` to prioritize plot-appropriate features over random selection.
 
 ### Resource Loading
 
