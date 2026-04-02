@@ -11,6 +11,7 @@
  * - adventure_find_walkable: Find guaranteed walkable coordinates in an area region
  * - adventure_generate_layout: Procedural layout generation (BSP rooms, corridors, features)
  * - adventure_apply_layout: Atomic application of a full layout (zones + crossers + features)
+ * - adventure_list_features: List solver-compatible feature groups for a tileset + terrain
  */
 
 import { z } from "zod";
@@ -28,7 +29,7 @@ import { snapshotGitForUndo } from "../util/undo.js";
 import { compileScript, jsonToGff, erfPack } from "../nim-tools.js";
 import { checkPlacementWalkable } from "../util/walkmesh.js";
 import { getTilesetInfo } from "../util/tileset.js";
-import { generateLayout } from "../util/layout-generator.js";
+import { generateLayout, groupHasDoors, groupHasCrossers, groupMatchesTerrain } from "../util/layout-generator.js";
 import type { LayoutStyle, SuggestedFeature } from "../util/layout-generator.js";
 import { solveArea } from "../util/zone-solver.js";
 import type { TerrainZone, CrosserPath, FeatureTile } from "../util/zone-solver.js";
@@ -627,6 +628,43 @@ export function registerAdventureTools(server: McpServer): void {
             ...(featureWarnings.length > 0 ? { featureWarnings } : {}),
             ...(result.warnings.length > 0 ? { solverWarnings: result.warnings } : {}),
             ...(shouldRepack ? { repacked } : {}),
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ─── adventure_list_features ──────────────────────────────────────────
+
+  server.tool(
+    "adventure_list_features",
+    "List feature groups from a tileset that are compatible with the layout solver for a given floor terrain. Filters out groups with doors, crosser edges, or mismatched terrain corners — only returns groups safe to pass as preferredFeatures to adventure_generate_layout.",
+    {
+      tileset: z.string().describe("Tileset resref (e.g., 'ttr01', 'tdm01')"),
+      terrain: z.string().describe("Floor terrain name to match against (e.g., 'grass', 'floor', 'forest'). Groups whose tile corners don't all match this terrain are excluded."),
+    },
+    { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+    async ({ tileset: tilesetResref, terrain }) => {
+      const index = requireIndex();
+      const resmanOpts = await buildResmanOptions(index);
+      const tilesetInfo = await getTilesetInfo(tilesetResref, resmanOpts, index);
+
+      const allowed = tilesetInfo.groups
+        .filter(g =>
+          g.tileIds.some(id => id >= 0) &&
+          !groupHasDoors(g, tilesetInfo) &&
+          !groupHasCrossers(g, tilesetInfo) &&
+          groupMatchesTerrain(g, tilesetInfo, terrain))
+        .map(g => ({ name: g.name, columns: g.columns, rows: g.rows }));
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            tileset: tilesetResref,
+            terrain,
+            features: allowed,
+            count: allowed.length,
           }, null, 2),
         }],
       };

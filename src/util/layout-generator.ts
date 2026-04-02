@@ -678,7 +678,7 @@ function connectRoomsWinding(a: Room, b: Room, crosserType: string, curvature: n
 
 // ─── Feature packing (mandatory — 50%+ tile coverage per room) ──────────────
 
-function groupHasDoors(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
+export function groupHasDoors(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
   for (const tileId of group.tileIds) {
     if (tileId < 0) continue;
     const tile = tileset.tiles[tileId];
@@ -687,7 +687,7 @@ function groupHasDoors(group: { tileIds: number[] }, tileset: TilesetInfo): bool
   return false;
 }
 
-function groupHasCrossers(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
+export function groupHasCrossers(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
   for (const tileId of group.tileIds) {
     if (tileId < 0) continue;
     const tile = tileset.tiles[tileId];
@@ -698,7 +698,7 @@ function groupHasCrossers(group: { tileIds: number[] }, tileset: TilesetInfo): b
 
 /** Check that ALL corners of ALL tiles in a group match the given terrain.
  *  Features with mismatched corners create visual seams and force solver fallbacks. */
-function groupMatchesTerrain(group: { tileIds: number[] }, tileset: TilesetInfo, terrain: string): boolean {
+export function groupMatchesTerrain(group: { tileIds: number[] }, tileset: TilesetInfo, terrain: string): boolean {
   const lc = terrain.toLowerCase();
   for (const tileId of group.tileIds) {
     if (tileId < 0) continue;
