@@ -67,54 +67,40 @@ One module loaded at a time. `load_module` must be called before any other tool.
 Tools are split between **base tools** (human-orchestrated editing) and **adventure tools** (autonomous module building):
 
 - **Base tools** (`src/tools/*.ts` except `adventure-tools.ts`) — 22 files covering reading, querying, editing, placement, and analysis. Used by both humans and the adventure creator.
-- **Adventure tools** (`src/tools/adventure-tools.ts`) — Tools specific to the `/create-adventure` pipeline: `create_adventure_transition`, `find_walkable_position`, `generate_area_layout`.
+- **Adventure tools** (`src/tools/adventure-tools.ts`) — Tools specific to the `/create-adventure` pipeline: `adventure_create_transition`, `adventure_find_walkable`, `adventure_generate_layout`, `adventure_apply_layout`.
 
 All tools have **MCP annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`) set via the 4th positional arg to `server.tool()`.
 
 ### Layout Generator
 
-`generate_area_layout` (in `src/util/layout-generator.ts`) is server-side procedural layout generation that encodes the area design rules from `adventure-areas/SKILL.md`. Returns zones + crossers ready for `paint_terrain`, plus transition points. Uses `computeValidPairs()` from `src/util/zone-solver.ts` to validate terrain adjacency chains.
+`adventure_generate_layout` (in `src/util/layout-generator.ts`) is server-side procedural layout generation that encodes the area design rules from `adventure-areas/SKILL.md`. Returns zones + crossers ready for `adventure_apply_layout`, plus transition points. Uses `computeValidPairs()` from `src/util/zone-solver.ts` to validate terrain adjacency chains.
 
-#### Interior Styles (dungeon / cave / dwelling)
+#### Unified BSP Pipeline
 
-All three interior styles use the same BSP + corridor pipeline, differentiated by `InteriorStyleConfig` presets:
+All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets in `layout-generator.ts`:
 
-- **`dungeon`** — Balanced variety. Moderate split variance (±15%), room sizes 60-100% of leaf, margin 2-3, 1 shortcut corridor, 50% S-curves, 30% L-shaped rooms.
-- **`cave`** — Maze-like. High variance (±20%), small rooms (40-70% of leaf), margin 2-4, 3 shortcut corridors, 70% S-curves, 10% L-shapes. More corridors than rooms.
-- **`dwelling`** — Building interior. Near-zero variance (±5%), rooms fill 85-100% of leaf, fixed margin 2, no shortcuts, 10% S-curves, no L-shapes. Clean quadrant layout.
+**Interior styles** (dungeon / cave / dwelling):
+- **`dungeon`** — Moderate split variance (±15%), room sizes 60-100% of leaf, margin 2-3, 1 shortcut corridor, 50% S-curves, 30% L-shaped rooms.
+- **`cave`** — High variance (±20%), small rooms (40-70% of leaf), margin 2-4, 3 shortcut corridors, 70% S-curves, 10% L-shapes.
+- **`dwelling`** — Near-zero variance (±5%), rooms fill 85-100% of leaf, fixed margin 2, no shortcuts, 10% S-curves, no L-shapes.
 
-#### Interior Layout Rules
+**Exterior styles** (forest / rural / city / plains / desert / castle / tundra):
+- Each has `wallKeywords` (border terrain), `floorKeywords` (room terrain), `crosserKeywords` (roads — unused as crossers, used for terrain corridor keyword matching).
+- Obstacle patches (water, trees, cliff) placed inside rooms via `obstacleKeywords` + `obstacleChance`.
+- Secondary crossers (stream/river) are **interior-only** — exterior styles never use crosser paths.
+
+#### Layout Rules
 
 - **BSP rooms**: minimum 3x3, margin >= 2 (4-tile wall gaps). Split threshold and variance controlled by style config. Room size is a random fraction of available leaf space, randomly offset within the leaf.
 - **L-shaped rooms**: Adjacent BSP siblings may merge into a single zone with probability `nonRectChance`. The zone solver handles arbitrary shapes.
 - **Corridor routing**: axis-overlap detection (straight connection at shared Y/X), L-bend fallback when rooms don't overlap on either axis.
 - **S-curves**: Probability controlled by `sCurveChance`. Offsets middle third by 1 tile perpendicular. Bends only on interior wall tiles (never first/last).
-- **Shortcut corridors**: `shortcutCount` controls how many T-junction shortcuts between non-adjacent rooms. Creates 3-way/4-way intersections where corridors cross.
-- **Corridor crossers stay on wall tiles only.** Never extend crosser paths into room floor tiles — this creates corridor arches inside rooms (wrong). Room boundary tiles are regular floor tiles resolved by the corner grid.
+- **Shortcut corridors**: `shortcutCount` controls how many T-junction shortcuts between non-adjacent rooms.
+- **Interior corridors use crossers** (corridor type only, on wall tiles). **Exterior corridors carve floor terrain zones** through wall terrain — no crosser paths.
 - **Crosser type**: use `corridor` (self-contained per tile). Never use `doorway` — doorway crossers require matched pairs on shared edges (arch geometry split between adjacent tiles).
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
 - **Solver fallback priority for uniform corners** (all-floor room tiles): drop crossers first (preserve floor), then try corner substitution. For mixed corners (wall-floor boundaries): try corner substitution to preserve crossers first, then drop.
-
-#### Exterior Styles (forest / rural / city / plains / desert / castle / tundra)
-
-All seven exterior styles use the same clearing distribution + road network pipeline, differentiated by `ExteriorStyleConfig` presets:
-
-- **`forest`** — Clearings in dense woodland. Cliff/trees border, winding roads, 50% stream crosser, 30% feature density.
-- **`rural`** — Farmland/village. Trees border, spine roads, 40% stream, 60% feature density. Best for ttr01, tts01, ttz01.
-- **`city`** — Urban exterior. Building/wall border, grid roads, 20% water, 80% feature density. Best for tcn01, tcm02.
-- **`plains`** — Open terrain. Cliff/mountain border, spine roads, 30% stream, 40% feature density. Best for trm02, trs02.
-- **`desert`** — Arid regions. Cliff border, spine roads, no stream, 30% feature density. Best for ttd01.
-- **`castle`** — Fortified exterior. Castlewall border, spine roads, 20% stream, 50% feature density. Best for tno01.
-- **`tundra`** — Frozen terrain. Trees border, spine roads, 15% water, 30% feature density. Best for tts02, tti01.
-
-#### Exterior Layout Rules
-
-- **Clearing distribution**: Grid-based with randomized sizes (per-clearing variation) and position jitter within cells.
-- **Perimeter border**: Impassable terrain (cliff, trees, building) on all edge tiles.
-- **Secondary terrain**: Per-clearing probability of adjacent 2x2 terrain patches (water, rocky).
-- **Road styles**: `spine` (sequential), `grid` (city Manhattan network), `winding` (S-curve paths).
-- **Secondary crossers**: Probability-based stream/river network connecting first and last clearings.
-- **Feature suggestions**: `suggestedFeatures` array in LayoutResult — pre-validated feature placements centered in clearings, filtered by fit (group.columns <= room.w, group.rows <= room.h), no overlap with crossers or perimeter.
+- **Feature suggestions**: `suggestedFeatures` array in LayoutResult — packed into rooms targeting 50%+ tile coverage. `adventure_apply_layout` applies zones + crossers + features atomically.
 
 ### Resource Loading
 
@@ -173,7 +159,7 @@ Returns type-specific summaries (utc: CR/race/classes, uti: baseItem/cost, etc.)
 Three mechanisms for moving between areas:
 - **`link_doors`** — bidirectional door-to-door linking. Doors are two-way objects.
 - **`create_area_transition`** — one-way trigger→waypoint transition. Places an Area Transition trigger (Type=1, LinkedToFlags=2=Waypoint) in the source area and a waypoint in the target area. Call twice with swapped source/target for two-way transitions.
-- **`create_adventure_transition`** — one-way portal for adventure modules. Places a useable blue shaft of light (`plc_solblue`) with an OnUsed script that opens a dialog ("Step through?" / "Turn away"). On confirmation, plays VFX_FNF_SUMMON_MONSTER_2 and jumps the PC to the destination waypoint after 2 seconds. The `/create-adventure` pipeline uses this exclusively instead of `create_area_transition`.
+- **`adventure_create_transition`** — one-way portal for adventure modules. Places a useable blue shaft of light (`plc_solblue`) with an OnUsed script that opens a dialog ("Step through?" / "Turn away"). On confirmation, plays VFX_FNF_SUMMON_MONSTER_2 and jumps the PC to the destination waypoint after 2 seconds. The `/create-adventure` pipeline uses this exclusively instead of `create_area_transition`.
 
 ## Trap Blueprints
 
@@ -191,7 +177,7 @@ Three mechanisms for moving between areas:
 
 All placement and movement tools **block** if the target position is non-walkable or within 1m of a non-walkable surface. Uses `checkPlacementWalkable()` in `walkmesh.ts` which checks the target point plus 4 cardinal probes at 1m distance.
 
-**Enforced on:** `place_creature`, `place_placeable`, `place_waypoint`, `place_trigger`, `place_encounter`, `place_store`, `move_object`, `bulk_move_objects`, `create_area_transition`, `create_adventure_transition` (both source and target positions).
+**Enforced on:** `place_creature`, `place_placeable`, `place_waypoint`, `place_trigger`, `place_encounter`, `place_store`, `move_object`, `bulk_move_objects`, `create_area_transition`, `adventure_create_transition` (both source and target positions).
 
 **Excluded:** `place_door` (doors sit at tile boundaries near walls), `place_sound` (audio sources don't need walkable positions), movement of Door List and SoundList objects.
 
@@ -205,7 +191,7 @@ The `wok_cache/` directory is lazy-initialized on first use via `ensureWokCacheD
 
 ## Zone-Based Terrain Solver
 
-`paint_terrain` takes terrain zones + crosser paths and re-solves ALL non-feature tiles via a corner grid approach (`src/util/zone-solver.ts`). Feature tiles (from `paint_feature`) are preserved automatically. `paint_tiles` is for exact tileId manual overrides only. Pass `autoRepack: "true"` to automatically save to the .mod file after painting (prevents lost work if context runs out).
+`adventure_apply_layout` (adventure tool) takes the full `LayoutResult` from `adventure_generate_layout` and applies zones + crossers + features atomically via the zone solver (`src/util/zone-solver.ts`). `paint_tiles` and `paint_group` are base tools for direct/manual tile placement — no solving.
 
 `get_tileset_details` defaults to `detail: "summary"` (~2KB) which includes terrain types, crosser types, valid terrain adjacencies, and group names. Use `detail: "full"` for the complete 60-100KB tile catalog.
 
@@ -240,5 +226,5 @@ You cannot skip terrains in the chain. For example, in `tno01` you must place a 
 - **GIC must be synced with GIT.** The toolset uses the GIC file to index objects in an area. `writeBackGit()` automatically syncs the GIC. Without GIC entries, objects exist in the GIT but the toolset doesn't show them.
 - **Placeable display name field is `LocName`**, not `LocalizedName`. Setting `LocalizedName` on a placeable has no effect — the toolset and engine read `LocName` (a cexolocstring).
 - **Placement Z height from walkmesh.** All placement tools automatically set the object's Z position from the walkmesh surface height. The walkmesh check returns the highest walkable face Z at the position. Use `fix_object_heights` to retroactively fix objects placed before this feature.
-- **Zone solver rejects incompatible adjacencies.** `paint_terrain` returns early with zero placements and `INCOMPATIBLE TERRAIN ADJACENCY` errors if the zone layout contains terrain pairs with no transition tiles. Fix the zone layout, don't retry.
+- **Zone solver rejects incompatible adjacencies.** `adventure_apply_layout` returns early with zero placements and `INCOMPATIBLE TERRAIN ADJACENCY` errors if the zone layout contains terrain pairs with no transition tiles. Fix the zone layout, don't retry.
 - **`fallbackSubstitute` is constrained.** The zone solver's fallback only tries terrains present in the corner grid (zone-defined + default). It will never inject an alien terrain.

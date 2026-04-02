@@ -104,7 +104,7 @@ export function registerBulkTools(server: McpServer): void {
   );
 
   server.tool(
-    "find_by_resref_pattern",
+    "search_by_resref",
     "Search for resources by resref pattern (case-insensitive substring match).",
     {
       pattern: z.string().describe("Substring to search for in resource names"),

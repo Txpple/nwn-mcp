@@ -4,7 +4,7 @@
  * The main terrain solving logic is in zone-solver.ts (zone-based approach).
  * This file provides:
  * - findDefaultTile: used by create_area to find a uniform fill tile
- * - validateTilePlacement: used by paint_tiles and paint_feature to check neighbors
+ * - validateTilePlacement: used by paint_tiles and paint_group to check neighbors
  *
  * Height tiles (any corner height > 0) are excluded from tile selection.
  */

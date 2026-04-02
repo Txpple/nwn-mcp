@@ -7,8 +7,10 @@
  *   (b) AI-driven adventure creation — this file
  *
  * Tools:
- * - create_adventure_transition: One-way portal (blue light → waypoint) with VFX
- * - find_walkable_position: Find guaranteed walkable coordinates in an area region
+ * - adventure_create_transition: One-way portal (blue light → waypoint) with VFX
+ * - adventure_find_walkable: Find guaranteed walkable coordinates in an area region
+ * - adventure_generate_layout: Procedural layout generation (BSP rooms, corridors, features)
+ * - adventure_apply_layout: Atomic application of a full layout (zones + crossers + features)
  */
 
 import { z } from "zod";
@@ -20,21 +22,23 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requireIndex, buildResmanOptions } from "../module-loader.js";
 import { GIT_STRUCT_ID } from "../config.js";
 import { resolveBlueprint, getGitDoc, writeBackGit, updateAreaCounts } from "../util/git-helpers.js";
-import { getFieldStr, getFieldNum, getFieldList, setField } from "../types/gff.js";
+import { getFieldStr, getFieldNum, getFieldList, setField, setFieldNum } from "../types/gff.js";
 import type { GffObj, GffDocument } from "../types/gff.js";
 import { snapshotGitForUndo } from "../util/undo.js";
-import { compileScript, jsonToGff } from "../nim-tools.js";
+import { compileScript, jsonToGff, erfPack } from "../nim-tools.js";
 import { checkPlacementWalkable } from "../util/walkmesh.js";
 import { getTilesetInfo } from "../util/tileset.js";
 import { generateLayout } from "../util/layout-generator.js";
-import type { LayoutStyle } from "../util/layout-generator.js";
+import type { LayoutStyle, SuggestedFeature } from "../util/layout-generator.js";
+import { solveArea } from "../util/zone-solver.js";
+import type { TerrainZone, CrosserPath, FeatureTile } from "../util/zone-solver.js";
 
 export function registerAdventureTools(server: McpServer): void {
 
-  // ─── create_adventure_transition ───────────────────────────────────────
+  // ─── adventure_create_transition ───────────────────────────────────────
 
   server.tool(
-    "create_adventure_transition",
+    "adventure_create_transition",
     "Create a one-way area transition for adventure modules: places a useable blue shaft of light (plc_solblue) in the source area and a waypoint in the target area. The light's OnUsed script plays VFX_FNF_SUMMON_MONSTER_2, then jumps the PC to the destination waypoint after 2 seconds. For two-way transitions, call twice with swapped source/target.",
     {
       sourceArea: z.string().describe("Area resref where the blue light is placed"),
@@ -180,7 +184,7 @@ export function registerAdventureTools(server: McpServer): void {
       };
 
       const { doc: targetGitDoc, obj: targetGit } = getGitDoc(index, targetArea);
-      snapshotGitForUndo(targetGitDoc, targetArea, "create_adventure_transition", `Place waypoint ${wpTag}`);
+      snapshotGitForUndo(targetGitDoc, targetArea, "adventure_create_transition", `Place waypoint ${wpTag}`);
       const wpList = getFieldList(targetGit, "WaypointList");
       wpList.push(waypoint);
       await writeBackGit(index, targetArea, targetGitDoc);
@@ -238,7 +242,7 @@ export function registerAdventureTools(server: McpServer): void {
       setField(lightObj, "LinkedTo", "cexostring", wpTag);
 
       const { doc: sourceGitDoc, obj: sourceGit } = getGitDoc(index, sourceArea);
-      snapshotGitForUndo(sourceGitDoc, sourceArea, "create_adventure_transition", `Place light ${lightTag}`);
+      snapshotGitForUndo(sourceGitDoc, sourceArea, "adventure_create_transition", `Place light ${lightTag}`);
       const placeableList = getFieldList(sourceGit, "Placeable List");
       placeableList.push(lightObj);
       await writeBackGit(index, sourceArea, sourceGitDoc);
@@ -263,10 +267,10 @@ export function registerAdventureTools(server: McpServer): void {
     },
   );
 
-  // ─── find_walkable_position ────────────────────────────────────────────
+  // ─── adventure_find_walkable ────────────────────────────────────────────
 
   server.tool(
-    "find_walkable_position",
+    "adventure_find_walkable",
     "Find guaranteed walkable coordinates in an area. Returns positions validated against the walkmesh with correct Z height. Use region to constrain the search to a part of the area.",
     {
       area: z.string().describe("Area resref"),
@@ -395,11 +399,11 @@ export function registerAdventureTools(server: McpServer): void {
     },
   );
 
-  // ─── generate_area_layout ──────────────────────────────────────────────
+  // ─── adventure_generate_layout ──────────────────────────────────────────────
 
   server.tool(
-    "generate_area_layout",
-    "Generate a procedural area layout with terrain zones, crosser paths, and transition points. Returns data ready to pass to paint_terrain. Encodes all layout rules: perimeter encapsulation, room separation, adjacency validation, walkable ratio. Styles: dungeon (varied rooms + corridors, some L-shapes), cave (smaller rooms, more corridors, maze-like), dwelling (quadrant rooms, fewer corridors, building interior), forest (clearings separated by trees, winding roads), rural (farmland/village, spine roads), city (urban cobblestone, grid roads), plains (open terrain, sparse clearings), desert (arid, cliff borders), castle (fortified exterior, castle walls), tundra (frozen, snow/camp clearings). Returns suggestedFeatures array with pre-validated feature placements.",
+    "adventure_generate_layout",
+    "Generate a procedural area layout with terrain zones, crosser paths, and transition points. Returns data ready to pass to adventure_apply_layout. Encodes all layout rules: perimeter encapsulation, room separation, adjacency validation, walkable ratio. Styles: dungeon (varied rooms + corridors, some L-shapes), cave (smaller rooms, more corridors, maze-like), dwelling (quadrant rooms, fewer corridors, building interior), forest (clearings separated by trees, winding roads), rural (farmland/village, spine roads), city (urban cobblestone, grid roads), plains (open terrain, sparse clearings), desert (arid, cliff borders), castle (fortified exterior, castle walls), tundra (frozen, snow/camp clearings). Returns suggestedFeatures array with pre-validated feature placements.",
     {
       tileset: z.string().describe("Tileset resref (e.g., 'tdc01' for crypt, 'ttf01' for forest)"),
       width: z.string().describe("Area width in tiles (8-18)"),
@@ -445,6 +449,141 @@ export function registerAdventureTools(server: McpServer): void {
         content: [{
           type: "text",
           text: JSON.stringify(result, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ─── adventure_apply_layout ──────────────────────────────────────────────────────
+
+  server.tool(
+    "adventure_apply_layout",
+    "Apply a complete area layout atomically. Takes the full output of adventure_generate_layout (zones, crossers, suggestedFeatures) and paints everything in one call — terrain zones via the zone solver, crosser paths, and multi-tile feature groups.",
+    {
+      area: z.string().describe("Area resref"),
+      layout: z.string().describe("JSON LayoutResult from adventure_generate_layout. Must contain zones, crossers, and suggestedFeatures arrays."),
+      autoRepack: z.string().optional().describe("If 'true', automatically repacks the module after painting."),
+    },
+    { idempotentHint: true },
+    async ({ area, layout: layoutJson, autoRepack: autoRepackStr }) => {
+      const shouldRepack = autoRepackStr?.toLowerCase() === "true";
+
+      // Parse the layout result
+      let zones: TerrainZone[];
+      let crossers: CrosserPath[];
+      let suggestedFeatures: SuggestedFeature[];
+      try {
+        const layout = JSON.parse(layoutJson);
+        zones = layout.zones ?? [];
+        crossers = layout.crossers ?? [];
+        suggestedFeatures = layout.suggestedFeatures ?? [];
+        if (!Array.isArray(zones)) throw new Error("zones must be an array");
+        if (!Array.isArray(crossers)) throw new Error("crossers must be an array");
+        if (!Array.isArray(suggestedFeatures)) throw new Error("suggestedFeatures must be an array");
+      } catch (e) {
+        return { content: [{ type: "text", text: `Invalid layout JSON: ${e}` }] };
+      }
+
+      const index = requireIndex();
+      const areKey = `${area.toLowerCase()}.are`;
+      const areDoc = index.parsedGff.get(areKey);
+      if (!areDoc) {
+        return { content: [{ type: "text", text: `Area not found: ${area}. Available: ${[...index.areas.keys()].join(", ")}` }] };
+      }
+
+      const are = areDoc as GffObj;
+      const areaWidth = getFieldNum(are, "Width");
+      const areaHeight = getFieldNum(are, "Height");
+      const tileList = getFieldList(are, "Tile_List");
+      const tilesetResref = getFieldStr(are, "Tileset").toLowerCase();
+
+      const resmanOpts = await buildResmanOptions(index);
+      const tileset = await getTilesetInfo(tilesetResref, resmanOpts, index);
+
+      // Resolve suggestedFeatures → FeatureTile[]
+      const featureTiles: FeatureTile[] = [];
+      const featureWarnings: string[] = [];
+      const featureGroups: string[] = [];
+
+      for (const sf of suggestedFeatures) {
+        const group = tileset.groups.find(g => g.name.toLowerCase() === sf.feature.toLowerCase());
+        if (!group) {
+          featureWarnings.push(`Group not found: ${sf.feature}`);
+          continue;
+        }
+        // Validate dimensions match
+        if (sf.columns !== group.columns || sf.rows !== group.rows) {
+          featureWarnings.push(`${sf.feature}: layout says ${sf.columns}x${sf.rows} but tileset group is ${group.columns}x${group.rows}`);
+          continue;
+        }
+        // Validate bounds
+        if (sf.x < 0 || sf.x + group.columns > areaWidth || sf.y < 0 || sf.y + group.rows > areaHeight) {
+          featureWarnings.push(`${sf.feature} at (${sf.x},${sf.y}) out of bounds for ${areaWidth}x${areaHeight} area`);
+          continue;
+        }
+        // Resolve group tiles (row-major, bottom-to-top, orientation 0)
+        for (let gr = 0; gr < group.rows; gr++) {
+          for (let gc = 0; gc < group.columns; gc++) {
+            const tileId = group.tileIds[gr * group.columns + gc];
+            if (tileId < 0) continue; // empty slot
+            featureTiles.push({ x: sf.x + gc, y: sf.y + gr, tileId, orientation: 0 });
+          }
+        }
+        featureGroups.push(sf.feature);
+      }
+
+      // Solve terrain with features locked in
+      const result = solveArea(areaWidth, areaHeight, tileset.defaultTerrain, tileset, zones, crossers, featureTiles);
+
+      // Write feature tiles to GFF
+      for (const ft of featureTiles) {
+        const idx = ft.y * areaWidth + ft.x;
+        const tileEntry = tileList[idx] as GffObj;
+        setFieldNum(tileEntry, "Tile_ID", ft.tileId, "int");
+        setFieldNum(tileEntry, "Tile_Orientation", ft.orientation, "int");
+        setFieldNum(tileEntry, "Tile_Height", 0, "int");
+      }
+
+      // Write solver placements to GFF
+      for (const p of result.placements) {
+        const idx = p.y * areaWidth + p.x;
+        const tileEntry = tileList[idx] as GffObj;
+        setFieldNum(tileEntry, "Tile_ID", p.tileId, "int");
+        setFieldNum(tileEntry, "Tile_Orientation", p.orientation, "int");
+        setFieldNum(tileEntry, "Tile_Height", 0, "int");
+      }
+
+      // Write back ARE
+      const areEntry = index.resources.get(areKey);
+      if (areEntry) {
+        await jsonToGff(areDoc, areEntry.filePath);
+      }
+
+      // Auto-repack if requested
+      let repacked = false;
+      if (shouldRepack) {
+        try {
+          const modPath = index.modPath;
+          if (modPath) {
+            await erfPack(index.tempDir, modPath);
+            repacked = true;
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            area,
+            tilesResolved: result.placements.length,
+            featuresPlaced: featureTiles.length,
+            featureGroups,
+            ...(featureWarnings.length > 0 ? { featureWarnings } : {}),
+            ...(result.warnings.length > 0 ? { solverWarnings: result.warnings } : {}),
+            ...(shouldRepack ? { repacked } : {}),
+          }, null, 2),
         }],
       };
     },

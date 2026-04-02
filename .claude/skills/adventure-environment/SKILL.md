@@ -104,7 +104,7 @@ Scale linearly for sizes in between. Interiors tend toward the higher end (more 
 6. **No wall-mounted or architecture-anchored placeables.** Our spatial data shows tile terrain and walkability but not wall positions within tiles. Wall torches, sconces, mounted heads, banners, lanterns, and any placeable designed to attach to a wall or ceiling will float in midair if placed without a wall behind them. **Only place freestanding, ground-level objects.** Use braziers, candelabras, and freestanding torches (`plc_freetorch`, `x3_plc_torch001`) for lighting instead of wall-mounted variants.
 7. **Placeables do NOT block walkmesh.** The NWN engine combines PWK no-walk zones with tile walkmesh at runtime. The skill does not need to worry about walkability blocking from placed placeables.
 
-Use the reference tables below to select placeables. Do NOT look up 2DA tables or call `resman_search` for every placeable — use the curated resrefs directly. Only use `resman_search` or `find_by_resref_pattern` if you need something specific not in the tables.
+Use the reference tables below to select placeables. Do NOT look up 2DA tables or call `resman_search` for every placeable — use the curated resrefs directly. Only use `resman_search` or `search_by_resref` if you need something specific not in the tables.
 
 ---
 

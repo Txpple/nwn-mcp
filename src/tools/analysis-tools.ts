@@ -11,7 +11,7 @@ import type { FlatDialogNode } from "../types/dialog.js";
 export function registerAnalysisTools(server: McpServer): void {
 
   server.tool(
-    "dependency_graph",
+    "get_dependency_graph",
     "Show resource dependency graph. Resources depend on other resources via script references, conversation assignments, etc.",
     { resource: z.string().optional().describe("Focus on a specific resource (e.g., 'forest.git'), or omit for full graph") },
     { readOnlyHint: true, idempotentHint: true },
@@ -127,7 +127,7 @@ export function registerAnalysisTools(server: McpServer): void {
   );
 
   server.tool(
-    "balance_report",
+    "get_balance_report",
     "Analyze creature difficulty and item values per area.",
     {},
     { readOnlyHint: true, idempotentHint: true },
@@ -185,7 +185,7 @@ export function registerAnalysisTools(server: McpServer): void {
   );
 
   server.tool(
-    "module_summary",
+    "get_module_summary",
     "Get a high-level summary of the entire module.",
     {},
     { readOnlyHint: true, idempotentHint: true },

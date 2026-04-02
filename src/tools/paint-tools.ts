@@ -4,9 +4,8 @@
  * Tools:
  * - create_area: Create a new area with default terrain tiles
  * - delete_area: Remove an area and its files from the module
- * - paint_terrain: Paint terrain zones + crosser paths (zone-based solver)
  * - paint_tiles: Set exact tile IDs (manual/direct placement)
- * - paint_feature: Place multi-tile groups (temples, lodges, etc.)
+ * - paint_group: Place multi-tile groups (temples, lodges, etc.)
  * - set_area_properties: Modify area lighting, music, weather, etc.
  */
 
@@ -15,13 +14,10 @@ import path from "path";
 import fs from "fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { requireIndex, buildResmanOptions } from "../module-loader.js";
-import { jsonToGff, erfPack } from "../nim-tools.js";
+import { jsonToGff } from "../nim-tools.js";
 import { getTilesetInfo } from "../util/tileset.js";
-import { getRotatedCorners, getRotatedCrossers } from "../util/tileset.js";
 import { validateTilePlacement, findDefaultTile } from "../util/tile-solver.js";
 import type { TileGridEntry } from "../util/tile-solver.js";
-import { solveArea } from "../util/zone-solver.js";
-import type { TerrainZone, CrosserPath, FeatureTile } from "../util/zone-solver.js";
 import { getFieldList, getFieldLocStr, getFieldNum, getFieldStr, setFieldNum } from "../types/gff.js";
 import type { GffDocument, GffObj } from "../types/gff.js";
 import { getWokForTile, computeTileWalkSummary, ensureWokCacheDir } from "../util/walkmesh.js";
@@ -320,161 +316,11 @@ export function registerPaintTools(server: McpServer): void {
     },
   );
 
-  // ─── paint_terrain ─────────────────────────────────────────────────────
-
-  server.tool(
-    "paint_terrain",
-    "Paint terrain zones and crosser paths onto an area. Specify regions of terrain (Water, Trees, etc.) and optional stream/road paths. The system automatically derives all tile assignments including transitions between zones. Feature tiles (placed with paint_feature) are preserved. Re-solves ALL non-feature tiles each call, so pass all zones (not just new ones). Tiles not in any zone get the area's default terrain.",
-    {
-      area: z.string().describe("Area resref"),
-      zones: z.string().describe("JSON array of terrain zones: [{terrain: 'Water', tiles: [{x:0,y:0}, ...]}, ...]. Later zones override earlier at shared boundaries."),
-      crossers: z.string().optional().describe("JSON array of crosser paths: [{type: 'Stream', path: [{x:0,y:0, edges:{top:true,bottom:true}}, ...]}]. Each tile specifies which edges carry the crosser."),
-      autoRepack: z.string().optional().describe("If 'true', automatically repacks the module after painting. Saves progress to the .mod file."),
-    },
-    { idempotentHint: true },
-    async ({ area, zones: zonesJson, crossers: crossersJson, autoRepack: autoRepackStr }) => {
-      const shouldRepack = autoRepackStr?.toLowerCase() === "true";
-      let zones: TerrainZone[];
-      let crossers: CrosserPath[] = [];
-      try {
-        zones = JSON.parse(zonesJson);
-        if (!Array.isArray(zones)) throw new Error("zones must be an array");
-      } catch (e) {
-        return { content: [{ type: "text", text: `Invalid zones JSON: ${e}` }] };
-      }
-      if (crossersJson) {
-        try {
-          crossers = JSON.parse(crossersJson);
-          if (!Array.isArray(crossers)) throw new Error("crossers must be an array");
-        } catch (e) {
-          return { content: [{ type: "text", text: `Invalid crossers JSON: ${e}` }] };
-        }
-      }
-
-      const index = requireIndex();
-      const areKey = `${area.toLowerCase()}.are`;
-      const areDoc = index.parsedGff.get(areKey);
-      if (!areDoc) {
-        return { content: [{ type: "text", text: `Area not found: ${area}. Available: ${[...index.areas.keys()].join(", ")}` }] };
-      }
-
-      const are = areDoc as GffObj;
-      const areaWidth = getFieldNum(are, "Width");
-      const areaHeight = getFieldNum(are, "Height");
-      const tileList = getFieldList(are, "Tile_List");
-      const tilesetResref = getFieldStr(are, "Tileset").toLowerCase();
-
-      const resmanOpts = await buildResmanOptions(index);
-      const tileset = await getTilesetInfo(tilesetResref, resmanOpts, index);
-
-      // Detect feature tiles (group tiles already placed by paint_feature)
-      const features: FeatureTile[] = [];
-      for (let i = 0; i < areaWidth * areaHeight; i++) {
-        const entry = tileList[i];
-        if (!entry) continue;
-        const tileId = getFieldNum(entry, "Tile_ID");
-        const tile = tileset.tiles[tileId];
-        if (tile && tile.groupId !== null) {
-          const x = i % areaWidth;
-          const y = Math.floor(i / areaWidth);
-          features.push({ x, y, tileId, orientation: getFieldNum(entry, "Tile_Orientation") });
-        }
-      }
-
-      // Solve the entire area
-      const result = solveArea(areaWidth, areaHeight, tileset.defaultTerrain, tileset, zones, crossers, features);
-
-      // Write placements to GFF
-      for (const p of result.placements) {
-        const idx = p.y * areaWidth + p.x;
-        const tileEntry = tileList[idx] as GffObj;
-        setFieldNum(tileEntry, "Tile_ID", p.tileId, "int");
-        setFieldNum(tileEntry, "Tile_Orientation", p.orientation, "int");
-        setFieldNum(tileEntry, "Tile_Height", 0, "int");
-      }
-
-      // Write back ARE
-      const areEntry = index.resources.get(areKey);
-      if (areEntry) {
-        await jsonToGff(areDoc, areEntry.filePath);
-      }
-
-      // Load walkmesh data for material reporting
-      const surfacemat = index.twodaTables.get("surfacemat") as TwoDATable | undefined;
-      const wokCacheDir = await ensureWokCacheDir();
-
-      const placementResults: Array<{
-        x: number; y: number; tileId: number; orientation: number;
-        terrain: string; dominantMaterial: string; walkablePercent: number;
-      }> = [];
-
-      for (const p of result.placements) {
-        const tile = tileset.tiles[p.tileId];
-        let terrainName = "";
-        let dominantMaterial = "Unknown";
-        let walkablePercent = 0;
-
-        if (tile) {
-          const corners = getRotatedCorners(tile, p.orientation);
-          const all = [corners.topLeft, corners.topRight, corners.bottomLeft, corners.bottomRight];
-          const counts = new Map<string, number>();
-          for (const t of all) counts.set(t, (counts.get(t) ?? 0) + 1);
-          let best = ""; let max = 0;
-          for (const [t, n] of counts) { if (n > max) { max = n; best = t; } }
-          terrainName = best;
-
-          try {
-            const wok = await getWokForTile(tile.model, resmanOpts, wokCacheDir);
-            if (wok) {
-              const summary = computeTileWalkSummary(wok, surfacemat);
-              dominantMaterial = summary.dominantMaterial;
-              walkablePercent = summary.walkablePercent;
-            }
-          } catch { /* non-fatal */ }
-        }
-
-        placementResults.push({
-          x: p.x, y: p.y, tileId: p.tileId, orientation: p.orientation,
-          terrain: terrainName, dominantMaterial, walkablePercent,
-        });
-      }
-
-      // Auto-repack if requested — saves progress to .mod file
-      let repacked = false;
-      if (shouldRepack) {
-        try {
-          const modPath = index.modPath;
-          if (modPath) {
-            await erfPack(index.tempDir, modPath);
-            repacked = true;
-          }
-        } catch { /* non-fatal — painting succeeded even if repack fails */ }
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            area,
-            tilesResolved: result.placements.length,
-            featuresPreserved: features.length,
-            warnings: result.warnings,
-            placements: placementResults,
-            ...(shouldRepack ? { repacked } : {}),
-          }, null, 2),
-        }],
-      };
-    },
-  );
-
   // ─── paint_tiles ──────────────────────────────────────────────────────
-  // Simplified: exact tile ID placement only (no terrain solver).
-  // Use paint_terrain for zone-based terrain painting.
 
   server.tool(
     "paint_tiles",
-    "Set exact tile IDs on specific positions. For manual overrides only — use paint_terrain for terrain zone painting.",
+    "Set exact tile IDs on specific positions. Direct placement, no solving.",
     {
       area: z.string().describe("Area resref"),
       tiles: z.string().describe("JSON array: [{x, y, tileId, orientation?}]"),
@@ -561,11 +407,11 @@ export function registerPaintTools(server: McpServer): void {
     },
   );
 
-  // ─── paint_feature ─────────────────────────────────────────────────────
+  // ─── paint_group ───────────────────────────────────────────────────────
 
   server.tool(
-    "paint_feature",
-    "Place a multi-tile group feature (e.g. 'Temple_3x2', 'Lodge_2x2') at a grid position. Validates bounds and edge constraints.",
+    "paint_group",
+    "Place a multi-tile group (e.g. 'Temple_3x2', 'Lodge_2x2') at a grid position. Validates bounds and edge constraints.",
     {
       area: z.string().describe("Area resref"),
       feature: z.string().describe("Group name (e.g. 'Temple_3x2', 'Lodge_2x2') — use get_tileset_details to see available groups"),

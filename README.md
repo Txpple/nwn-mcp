@@ -155,8 +155,9 @@ Just describe the kind of adventure you want to play and your party size and lev
 - `create_area` — create a new area with terrain tiles
 - `get_area_details` — area properties, lighting, weather, music
 - `set_area_properties` — modify lighting, fog, music, weather
-- `paint_terrain` — zone-based terrain painting with automatic tile solving (supports `autoRepack` to save progress)
-- `paint_feature` — place multi-tile features (temples, lodges, etc.)
+- `paint_tiles` — set exact tile IDs on specific positions (direct placement)
+- `paint_group` — place multi-tile groups (temples, lodges, etc.)
+- `adventure_apply_layout` — apply a full layout atomically: zones + crossers + features via zone solver (adventure tool)
 - `get_tileset_details` — tileset info with summary mode (~2KB) or full tile catalog (~60-100KB)
 
 > **Note:** Terrain painting is best-effort — always open the module in the toolset to review painted areas and touch up as needed.
@@ -190,22 +191,22 @@ Just describe the kind of adventure you want to play and your party size and lev
 
 - `validate_module` — check for broken references across the module
 - `check_area_connectivity` — verify all areas are reachable via transitions
-- `balance_report` — creature difficulty and item values per area
+- `get_balance_report` — creature difficulty and item values per area
 - `suggest_encounter` — advisory tool for encounter composition by party level
 
 ### Module Management
 
 - `load_module` / `repack_module` — load and save modules
-- `get_module_info` / `module_summary` — module metadata and overview
+- `get_module_info` / `get_module_summary` — module metadata and overview
 - `undo_last_change` / `undo_history` — revert recent changes
 
 ### Adventure Creator
 
 Tools specific to the `/create-adventure` pipeline for autonomous module building:
 
-- `generate_area_layout` — procedural area layout generation with feature suggestions (dungeon, cave, dwelling, forest, rural, city, plains, desert, castle, tundra)
-- `find_walkable_position` — find guaranteed walkable coordinates in an area region
-- `create_adventure_transition` — one-way portal transitions (blue light + VFX + dialog)
+- `adventure_generate_layout` — procedural area layout generation with feature suggestions (dungeon, cave, dwelling, forest, rural, city, plains, desert, castle, tundra)
+- `adventure_find_walkable` — find guaranteed walkable coordinates in an area region
+- `adventure_create_transition` — one-way portal transitions (blue light + VFX + dialog)
 
 ## Architecture
 

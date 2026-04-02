@@ -36,7 +36,7 @@ If any required section is missing or contains no content below its heading:
 ### Phase 1: Understand Context
 
 - Read the existing `adventure.md` to get the title, module metadata, and target level.
-- Call `module_summary` to understand the loaded module state.
+- Call `get_module_summary` to understand the loaded module state.
 - Call `list_areas` to see what locations already exist.
 - Call `list_tilesets` to understand what spatial environments are available. This informs what kinds of locations are buildable (forest, dungeon, crypt, city, interior, castle, etc.). Do NOT design locations that require tilesets or terrain types that don't exist.
 

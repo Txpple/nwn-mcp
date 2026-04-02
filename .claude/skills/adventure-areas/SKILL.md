@@ -118,19 +118,19 @@ Propose area dimensions based on the plot's description of the location's scale:
 - Medium area: 12x12 to 14x14
 - Large exploration area: 16x16 to 18x18
 
-**Preferred approach: Use `generate_area_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road).
+**Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road).
 
 ```
-generate_area_layout(tileset="tdc01", width="10", height="10",
+adventure_generate_layout(tileset="tdc01", width="10", height="10",
   style='{"type":"dungeon","rooms":3,"corridorStyle":"straight"}',
   transitionCount="2", transitionDirections='["south","north"]')
 ```
 
-The result contains `zones` and `crossers` ready to pass directly to `paint_terrain`, plus `transitionPoints` with guaranteed in-bounds coordinates.
+The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass directly to `adventure_apply_layout`, plus `transitionPoints` with guaranteed in-bounds coordinates.
 
-**Fallback:** If `generate_area_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
+**Fallback:** If `adventure_generate_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
 
-Only call `get_tileset_details` if you need specific group names for `paint_feature`. Use `detail="summary"` (the default) for a compact ~2KB overview with terrain adjacencies — only use `detail="full"` if you need the complete tile catalog.
+Only call `get_tileset_details` if you need specific group names for `paint_group`. Use `detail="summary"` (the default) for a compact ~2KB overview with terrain adjacencies — only use `detail="full"` if you need the complete tile catalog.
 
 ---
 
@@ -140,9 +140,7 @@ Execute in this order:
 
 1. **Create the area** — `create_area` with tileset, dimensions, and a resref derived from the area name (lowercase, no spaces, e.g., `darkforest`, `temple_ruins`).
 
-2. **Paint features first** — `paint_feature` for any multi-tile groups (temples, lodges, bridges). These are preserved by the terrain solver.
-
-3. **Paint terrain + crossers** — A single `paint_terrain` call with ALL terrain zones and crosser paths. Pass `autoRepack: "true"` to save progress to the .mod file immediately (prevents lost work if context runs out). The zone-based solver derives all tile assignments including transitions. Feature tiles are never overwritten.
+2. **Paint the layout** — A single `adventure_apply_layout` call with the full `LayoutResult` from `adventure_generate_layout`. Pass `autoRepack: "true"` to save progress to the .mod file immediately (prevents lost work if context runs out). The solver applies all terrain zones, crosser paths, and feature groups atomically.
 
    **CRITICAL — Perimeter encapsulation (applies to BOTH interior and exterior areas):**
 
@@ -151,7 +149,7 @@ Execute in this order:
    - **Interior areas:** The entire perimeter ring must remain the default Wall terrain. Do NOT place floor, room, shop, or any non-wall zone on any tile that touches the area boundary. If a room zone would extend to the edge, shrink it inward by at least 1 tile.
    - **Exterior areas:** The entire perimeter ring must be covered by impassable terrain — Trees, Cliffs, Rocky, Mountains, or the tileset's equivalent border terrain. Do NOT place Grass, Dirt, Sand, Road, or any walkable terrain on perimeter tiles. Do NOT extend crosser paths into the perimeter — the solver automatically trims crossers from border tiles. Crossers should start/end at the first/last walkable tile inside the perimeter (row 1, row height-2, col 1, col width-2).
 
-   When building your terrain zones for `paint_terrain`, explicitly ensure every zone rectangle starts at row/column 1 (not 0) and ends at max-1 (not max). Leave the perimeter untouched as default terrain for interior, or explicitly assign border terrain for exterior.
+   The layout generator already handles perimeter encapsulation. When designing manual fallback zones, ensure every zone rectangle starts at row/column 1 (not 0) and ends at max-1 (not max). Leave the perimeter untouched as default terrain for interior, or explicitly assign border terrain for exterior.
 
    **CRITICAL — Terrain adjacency chains:**
 
@@ -227,30 +225,28 @@ Where `forwardRotate` for orientation 0-3: case 0=(x,y), case 1=(-y,x), case 2=(
 
 ### Phase 6: Connectivity Validation
 
-Check `paint_terrain` results for corridor tiles with `walkablePercent` below 25%. Fix with `paint_tiles` using a different tileId with the same crosser pattern but higher walkability.
-
-Only call `visualize_area` if `paint_terrain` returned crosser mismatch warnings or if isolated zones seem likely. If called, check `zones` array — every room must be reachable from every other room. Fix isolated zones by adding corridor crossers through wall tiles and repainting.
+Check `adventure_apply_layout` results for `solverWarnings`. If there are crosser mismatch warnings or isolated zones seem likely, call `visualize_area` and check `zones` array — every room must be reachable from every other room. Fix with `paint_tiles` for manual overrides on problem spots.
 
 ---
 
 ### Phase 7: Link Area Transitions
 
-Use `create_adventure_transition` for ALL area transitions — do NOT use doors, `link_doors`, or `create_area_transition`. The adventure pipeline uses the light-based transition tool exclusively.
+Use `adventure_create_transition` for ALL area transitions — do NOT use doors, `link_doors`, or `create_area_transition`. The adventure pipeline uses the light-based transition tool exclusively.
 
-`create_adventure_transition` creates a one-way area transition using a useable blue shaft of light ("Area Transition"). The player clicks the light, a dialog asks if they want to step through, and on confirmation a VFX plays and the PC teleports to the destination waypoint. For two-way connections, call `create_adventure_transition` **twice** with swapped source/target. No separate visual marker (`plc_solblue`) is needed — the portal IS the blue light.
+`adventure_create_transition` creates a one-way area transition using a useable blue shaft of light ("Area Transition"). The player clicks the light, a dialog asks if they want to step through, and on confirmation a VFX plays and the PC teleports to the destination waypoint. For two-way connections, call `adventure_create_transition` **twice** with swapped source/target. No separate visual marker (`plc_solblue`) is needed — the portal IS the blue light.
 
 **CRITICAL: Tag length limit.** The transition script resref is `a_at_<tag>`, and NWN resrefs are max 16 characters. That means the `tag` parameter can be at most **11 characters** (`16 - 5` for the `a_at_` prefix). Use short abbreviated tags like `vil_inn`, `inn_vil`, `vil_cry`, `cry_vil` — NOT `village_to_inn` (which truncates and collides with `village_to_crypt`). Every transition pair must have a **unique** tag that fits in 11 chars.
 
 ```
 # Village → Cave
-create_adventure_transition(
+adventure_create_transition(
   sourceArea: "village", sourceX: "85.0", sourceY: "45.0",
   targetArea: "cave", targetX: "15.0", targetY: "15.0",
   tag: "vil_cave"
 )
 
 # Cave → Village (return path)
-create_adventure_transition(
+adventure_create_transition(
   sourceArea: "cave", sourceX: "12.0", sourceY: "15.0",
   targetArea: "village", targetX: "82.0", targetY: "45.0",
   tag: "cave_vil"
@@ -262,8 +258,8 @@ The tool places a useable blue shaft of light ("Area Transition") with an OnUsed
 Place the target waypoint at the same position as the destination portal. Since portals require clicking (not walk-through), there's no risk of re-triggering.
 
 **Transition placement rules:**
-- **Use `generate_area_layout` transition points** when available — these are pre-computed walkable coordinates near the correct edge.
-- **Use `find_walkable_position`** to get guaranteed walkable coordinates if you need to place transitions manually: `find_walkable_position(area="myarea", region="south")` returns validated positions with Z height.
+- **Use `adventure_generate_layout` transition points** when available — these are pre-computed walkable coordinates near the correct edge.
+- **Use `adventure_find_walkable`** to get guaranteed walkable coordinates if you need to place transitions manually: `adventure_find_walkable(area="myarea", region="south")` returns validated positions with Z height.
 - **On crosser paths (roads/streams):** Place the light on the **last crosser tile before the border** — the tile where the crosser ends. Center on that tile (tile_col * 10 + 5, tile_row * 10 + 5).
 - **Without crossers:** Place the light on the walkable tile closest to the cliff/wall edge. Typically at row 1 or row (height-2), col 1 or col (width-2).
 - **At buildings/structures:** Place the light directly in front of feature doors.
@@ -316,10 +312,10 @@ Many interior tilesets (e.g., `tic01`, `tin01`) have multiple named room terrain
 **Before designing a multi-room-type layout:**
 1. Call `get_tileset_details` on the tileset.
 2. Scan the tile catalog for tiles whose `cornerTerrains` mix the two types you want to connect (e.g., `{tl: "stone", tr: "jail", ...}`) AND have a crosser (`"top"/"bottom"/"left"/"right"` non-empty).
-3. If such tiles exist → you CAN connect those room types with a Corridor crosser on the Wall boundary tiles between them. Add an explicit crosser path in your `paint_terrain` call at the boundary.
+3. If such tiles exist → you CAN connect those room types with a Corridor crosser on the Wall boundary tiles between them. The layout generator handles this automatically.
 4. If NO such mixed-type corridor tiles exist → do NOT mix those room types in the same area. Use one of:
-   - **Single room type throughout** — use one terrain type (e.g., all Stone) and add `paint_feature` groups for visual variety within it.
-   - **Separate areas** — put each room type in its own area, connected via `create_adventure_transition`.
+   - **Single room type throughout** — use one terrain type (e.g., all Stone) and add `paint_group` groups for visual variety within it.
+   - **Separate areas** — put each room type in its own area, connected via `adventure_create_transition`.
 
 **Never assume mixed room types can connect.** Always verify first.
 
@@ -330,7 +326,7 @@ The solver prioritizes preserving crossers over exact corner matching. At a Pit/
 ## Important Notes
 
 - **Tile coordinates:** Column = x (left to right), Row = y (bottom to top). World position = tile * 10.0.
-- **Feature placement:** `paint_feature` x,y is the bottom-left corner of the feature group.
-- **Zone-based solver:** `paint_terrain` re-solves ALL non-feature tiles each call. Pass ALL zones each time.
+- **Feature placement:** `paint_group` x,y is the bottom-left corner of the feature group. `adventure_apply_layout` handles this automatically from `suggestedFeatures`.
+- **Zone-based solver:** `adventure_apply_layout` resolves all terrain, crossers, and features atomically.
 - **Manual overrides:** Use `paint_tiles` with exact tileId for tiles the zone solver can't handle.
 - **Do NOT auto-export HTML reports.**
