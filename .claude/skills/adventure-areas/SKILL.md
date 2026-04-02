@@ -118,21 +118,36 @@ Propose area dimensions based on the plot's description of the location's scale:
 - Medium area: 14x14 to 16x16
 - Large exploration area: 18x18 to 24x24
 
-**Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually. Styles: `dungeon` (BSP rooms + corridors), `cave` (organic chambers), `forest_clearing` (exterior clearings separated by trees), `village` (buildings along a road).
+**Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually.
 
-**Before calling `adventure_generate_layout`, call `get_tileset_details`** (summary mode) to see the available groups. Choose features that match the plot description for this area and pass them as `preferredFeatures` in the style object. The generator will prioritize these groups when packing features into rooms, falling back to random selection only if preferred features don't fit.
+**Available styles:** `dungeon` (rooms + corridor crossers), `cave` (organic chambers + corridors), `dwelling` (quadrant rooms, building interior), `forest` (clearings in cliff/trees), `rural` (farmland clearings in trees), `city` (urban spaces), `plains` (open terrain, sparse clearings), `desert` (arid, cliff borders), `castle` (fortified exterior, castle walls), `tundra` (frozen, snow clearings).
+
+**MANDATORY: Choose thematic features BEFORE generating layouts.**
+1. Call `get_tileset_details` (summary mode) to see the tileset's available group names.
+2. Read the plot description for this area — what should the player see? A farmstead needs farms, barns, wells. A graveyard needs graves, ruins, crypts. A military camp needs tents, weapons racks, fortifications.
+3. Pick 4-8 group names from the tileset that match the area's narrative purpose.
+4. Pass them as `preferredFeatures` in the style object. **Do NOT omit preferredFeatures** — without it the generator picks random groups and the area will feel incoherent (e.g., Dragon Skeletons in a peaceful farmstead, Evil Temples in a village square).
 
 ```
+# Example: a farmstead area — features match the narrative
 adventure_generate_layout(tileset="ttr01", width="12", height="12",
-  style='{"type":"rural","rooms":4,"corridorStyle":"straight","preferredFeatures":["Farm 1 2x2","Barn 1 2x2","Field 1 2x2","Well"]}',
+  style='{"type":"rural","rooms":4,"preferredFeatures":["Farm 1 2x2","Barn 1 2x2","Field 1 2x2","Well","Field 3 1x2"]}',
   transitionCount="2", transitionDirections='["south","north"]')
+
+# Example: a dark cave lair — features match the narrative
+adventure_generate_layout(tileset="tdm01", width="10", height="10",
+  style='{"type":"cave","rooms":4,"preferredFeatures":["Treasure01","Treasure02","Platform01_2x2","Pillar02","Mineshaft"]}',
+  transitionCount="1")
+
+# Example: a haunted forest — features match the narrative
+adventure_generate_layout(tileset="ttf02", width="16", height="16",
+  style='{"type":"forest","rooms":4,"preferredFeatures":["Graveyard","Graveyard 1x2","Ruin","Ruin 1 2x2","Webbed Forest"]}',
+  transitionCount="2")
 ```
 
 The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass directly to `adventure_apply_layout`, plus `transitionPoints` with guaranteed in-bounds coordinates.
 
 **Fallback:** If `adventure_generate_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
-
-**Always call `get_tileset_details`** (summary mode) before generating layouts — you need the group names for `preferredFeatures` and terrain adjacency info for layout planning.
 
 ---
 

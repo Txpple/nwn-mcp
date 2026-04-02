@@ -7,6 +7,7 @@ MCP (Model Context Protocol) server for Neverwinter Nights Enhanced Edition modu
 - **Do NOT auto-export HTML reports** after creating or painting areas. Only export reports when the user explicitly asks for one.
 - **Always repack after creating/painting test areas** so the user can see them in the toolset. Mention that you repacked.
 - **MCP server restart required after code changes.** After editing TypeScript source and running `npm run build`, the MCP server must be restarted for new/changed tools to become available. Ask the user to restart before attempting to use newly added tools.
+- **Keep skills in sync with tools.** When adding, renaming, or changing tool parameters/behavior, immediately update the `.claude/skills/` SKILL.md files that reference those tools. The LLM follows skill instructions, not tool schemas — if a skill doesn't mention a parameter, the LLM won't use it.
 
 ## Design Intent
 
