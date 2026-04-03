@@ -15,7 +15,7 @@ An [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server for *
 - **Query and update** NWN SQLite campaign databases
 - **HTML area reports** — interactive visual maps of areas for human review
 
-**Bonus:** A one-shot adventure creator skill with subagents to generate a small module with 30–60 minutes of gameplay for you and your friends. If you have the tokens, use `/create-adventure` and have fun.
+**Bonus:** A fully autonomous one-shot adventure creator. Give it a prompt, sit back, and get a playable module — areas painted, NPCs placed, quests written, loot balanced, all hands-free. Use `/create-adventure` and have fun. (Warning: spoiler-free by design — the DM gets surprised too.)
 
 Designed for two workflows:
 
@@ -70,8 +70,6 @@ Add the server to your MCP client config. The config location depends on your cl
   }
 }
 ```
-
-See `.mcp.json.example` for a template you can copy and edit.
 
 **Windows paths example:**
 ```json
@@ -205,6 +203,8 @@ Just describe the kind of adventure you want to play and your party size and lev
 Tools specific to the `/create-adventure` pipeline for autonomous module building:
 
 - `adventure_generate_layout` — procedural area layout generation with feature suggestions (dungeon, cave, dwelling, forest, rural, city, plains, desert, castle, tundra)
+- `adventure_apply_layout` — atomically apply a generated layout (zones + crossers + features) via the zone solver
+- `adventure_list_features` — enumerate solver-compatible feature groups for a tileset and style
 - `adventure_find_walkable` — find guaranteed walkable coordinates in an area region
 - `adventure_create_transition` — one-way portal transitions (blue light + VFX + dialog)
 
