@@ -563,10 +563,10 @@ function computeCorridorPath(
     const x1 = Math.max(a.x, b.x);
     const xMin = Math.min(x0, x1), xMax = Math.max(x0, x1);
     const wallStartX = xMin + 1, wallEndX = xMax - 1, wallSpanX = wallEndX - wallStartX + 1;
-    if (corridorStyle !== "zigzag" && wallSpanX >= 4 && Math.random() < sCurveChance) {
+    if (corridorStyle !== "zigzag" && wallSpanX >= 3 && Math.random() < sCurveChance) {
       const offsetDir = Math.random() < 0.5 ? 1 : -1;
       const bendStart = wallStartX + Math.max(1, Math.floor(wallSpanX / 3));
-      const bendEnd = wallStartX + Math.min(wallSpanX - 2, Math.floor(2 * wallSpanX / 3));
+      const bendEnd = wallStartX + Math.min(wallSpanX - 1, Math.floor(2 * wallSpanX / 3));
       if (bendStart < bendEnd) {
         for (let x = xMin; x <= xMax; x++) {
           if (x === bendStart) { path.push({ x, y: sharedY }); path.push({ x, y: sharedY + offsetDir }); }
@@ -585,10 +585,10 @@ function computeCorridorPath(
     const y0 = Math.min(aTop, bTop), y1 = Math.max(a.y, b.y);
     const yMin = Math.min(y0, y1), yMax = Math.max(y0, y1);
     const wallStartY = yMin + 1, wallEndY = yMax - 1, wallSpanY = wallEndY - wallStartY + 1;
-    if (corridorStyle !== "zigzag" && wallSpanY >= 4 && Math.random() < sCurveChance) {
+    if (corridorStyle !== "zigzag" && wallSpanY >= 3 && Math.random() < sCurveChance) {
       const offsetDir = Math.random() < 0.5 ? 1 : -1;
       const bendStart = wallStartY + Math.max(1, Math.floor(wallSpanY / 3));
-      const bendEnd = wallStartY + Math.min(wallSpanY - 2, Math.floor(2 * wallSpanY / 3));
+      const bendEnd = wallStartY + Math.min(wallSpanY - 1, Math.floor(2 * wallSpanY / 3));
       if (bendStart < bendEnd) {
         for (let y = yMin; y <= yMax; y++) {
           if (y === bendStart) { path.push({ x: sharedX, y }); path.push({ x: sharedX + offsetDir, y }); }
