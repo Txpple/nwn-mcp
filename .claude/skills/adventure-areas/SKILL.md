@@ -268,6 +268,8 @@ adventure_create_transition(
 
 The tool places a useable blue shaft of light ("Area Transition") with an OnUsed script that plays a teleport VFX and jumps the PC to the destination. No separate visual marker needed — the light IS the visual marker.
 
+**After placing transitions, update the transition dialog text** to tell the player where each portal leads. Use `edit_dialog_node` on the generated dialog (resref `d_at_<tag>`, entry node index 0) to set text like: *"This appears to be the way to The Ashfen Mine. Do you wish to step through?"* — using the destination area's display name from `list_areas`. For return portals, use phrasing like *"This appears to be the way back to Millhaven."*
+
 Place the target waypoint at the same position as the destination portal. Since portals require clicking (not walk-through), there's no risk of re-triggering.
 
 **Transition placement rules:**

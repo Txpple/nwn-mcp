@@ -273,6 +273,13 @@ Repack the module with `repack_module`.
 - Hostile creatures are placed by `/adventure-challenges`, not this skill.
 - If `/adventure-quests` needs a merchant NPC, it can change the faction to 3 (Merchant) later.
 
+## Plot Flag Rules
+
+- **ALL quest-giving NPCs and quest-relevant NPCs MUST be flagged as Plot (immortal).** After placing each quest NPC in the area GIT, set `Plot=1` on their creature entry using `modify_gff_field` with path `Creature List.<index>.Plot`, value `1`, gffType `byte`.
+- This prevents them from being accidentally killed by hostile creatures placed nearby or by AoE abilities, which would break quests.
+- **Quest actors must NEVER have a story path that turns them hostile.** Their dialog and scripts should never change their faction to Hostile. If the plot requires confrontation with a quest NPC, handle it through dialog choices and journal updates — not by making the NPC attackable.
+- Plot-flagged NPCs: any NPC referenced in quest objectives, any NPC with dialog that advances quest state, any merchant NPC essential to the adventure.
+
 ---
 
 ## Humanoid NPC Source Blueprints

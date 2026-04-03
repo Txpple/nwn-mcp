@@ -101,6 +101,7 @@ All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets
 - **Corridor edge flags only point wall-to-wall**: crosser edges are NOT generated toward room tiles. Room-boundary corners handle the visual transition. Generating edges toward rooms requests combos like `wall/wall/floor/floor + corridor` that no tileset tile satisfies.
 - **Crosser type**: use `corridor` (self-contained per tile). Never use `doorway` — doorway crossers require matched pairs on shared edges (arch geometry split between adjacent tiles).
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
+- **Room-corner crosser exclusion**: tiles diagonally adjacent to rooms (but NOT cardinally adjacent) are excluded from corridor crosser paths. These tiles get a single non-wall corner from the corner grid (3-wall+1-floor pattern) and no tileset has crosser tiles for that pattern. Room-EDGE tiles (cardinally adjacent) are kept — the solver's step 1.5 finds corridor-mouth tiles for them.
 - **Solver scan-order**: solves bottom-to-top, left-to-right. Fallback chain: (1) exact corners+crossers, (1.5) adjust free corners+keep crossers, (2) exact corners+drop crossers, (3) adjust free corners+drop crossers, (4) all-default fallback. Step 1.5 finds "corridor mouth" tiles by adjusting room-edge corners. Adjustments are written back to the corner grid so downstream tiles see them.
 - **Feature group filters**: groups with door tiles, crosser edges, or mismatched terrain corners are excluded from feature packing and `adventure_apply_layout`. Door geometry and crosser edges on feature tiles conflict with the solver's grids. Terrain mismatch means a feature tile's corners don't all match the room's floor terrain — placing such a feature locks foreign corners into the grid, creating visual seams and forcing solver fallbacks on neighboring tiles.
 - **Feature suggestions**: `suggestedFeatures` array in LayoutResult — packed into rooms targeting 50%+ tile coverage. `adventure_apply_layout` applies zones + crossers + features atomically. Pass `preferredFeatures` (array of group names from `get_tileset_details`) in `LayoutStyle` to prioritize plot-appropriate features over random selection.
@@ -198,6 +199,22 @@ The `wok_cache/` directory is lazy-initialized on first use via `ensureWokCacheD
 
 `get_tileset_details` defaults to `detail: "summary"` (~2KB) which includes terrain types, crosser types, valid terrain adjacencies, and group names. Use `detail: "full"` for the complete 60-100KB tile catalog.
 
+### Tile Matching Rules
+
+The **only** determining factors for tile selection from .set files are:
+- **Corner terrains:** `TopLeft`, `TopRight`, `BottomLeft`, `BottomRight`
+- **Corner heights:** `TopLeftHeight`, `TopRightHeight`, `BottomLeftHeight`, `BottomRightHeight`
+- **Edge crossers:** `Top`, `Right`, `Bottom`, `Left`
+- **Orientation:** the `.set` `Orientation` field (0/90/180/270 degrees)
+
+The `.set` file `[PRIMARY RULES]` and `[SECONDARY RULES]` sections are **NOT functional for tile solving**. They are toolset autotiling rules for terrain propagation when painting in the toolset. They do not restrict which tiles can be placed where. **IGNORE them entirely.**
+
+### Tile Orientation Normalization
+
+The `.set` `Orientation` field specifies the rotation (degrees) at which the tile's corners and crossers are defined in the file. At parse time in `tileset.ts`, corners and crossers are **un-rotated by the `.set` Orientation** to normalize all tiles to GIT orientation 0. This ensures `getRotatedCorners(tile, gitOri)` returns the correct effective corners for any GIT placement orientation.
+
+The solver also **prefers tiles at their natural `.set` Orientation** — the rotation the 3D model was designed for — over rotated alternatives that produce the same corner pattern. This prevents visual artifacts from tiles whose model geometry doesn't align properly when placed at non-native orientations.
+
 ### Terrain Adjacency Constraint
 
 **Zone layouts must respect tileset terrain adjacency chains.** Tilesets only have transition tiles between specific terrain pairs. If two terrains can't transition directly, a buffer zone of the intermediate terrain is REQUIRED — the solver will NOT fabricate intermediate terrains.
@@ -216,7 +233,7 @@ You cannot skip terrains in the chain. For example, in `tno01` you must place a 
 - **Resman tools are slow.** Every invocation initializes the full resman stack. Default timeout (30s) is too short for piped operations — `resmanCatToJson()` uses 120s.
 - **Temp dir contains cache subdirs.** `resman_2da/`, `tileset_cache/`, `wok_cache/`, `blueprint_cache/` — all auto-excluded from `erfPack()` by the `isFile()` filter. Never pack these into the module.
 - **`validate_module` false positives.** Base game scripts (`nw_c2_default5`, etc.) and items (`nw_wblms001`) are resolved at runtime — filter these "missing" references.
-- **Primary/secondary rules in .set files are NOT used.** The tile solver works entirely by matching corner terrains and edge crossers on tile entries. Ignore `[PRIMARY RULES]` and `[SECONDARY RULES]` sections.
+- **Primary/secondary rules in .set files are NOT functional and must be IGNORED.** They are toolset autotiling propagation rules, not tile placement constraints. The tile solver works entirely by matching corner terrains, corner heights, edge crossers, and the `.set` Orientation field.
 - **Height tiles excluded from solving.** Tiles with any corner height > 0 are filtered out. All solver-placed tiles are flat.
 - **Tile rotation: do NOT swap cases 1 and 3.** Case 1 = 90° CW, case 3 = 270° CW. Verified against `forwardRotate` + SVG normalization pipeline.
 - **DLG field completeness is critical.** The NWN engine silently fails to load dialogs missing standard fields. Every entry/reply MUST include `Animation`, `AnimLoop`, `Comment`, `Delay`, `Quest`, `Script`, `Sound`. Every link struct MUST include `IsChild`. The `makeEntry`/`makeReply`/`makeLink` helpers in `dialog-write-tools.ts` handle this.

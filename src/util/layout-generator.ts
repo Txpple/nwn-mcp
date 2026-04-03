@@ -599,30 +599,54 @@ function connectRooms(
   const wallOnly = fullPath.filter(p => !floorTiles.has(`${p.x},${p.y}`));
   if (wallOnly.length === 0) return null;
 
+  // Identify room-corner tiles: diagonally adjacent to a room tile but NOT
+  // cardinally adjacent. These tiles get a single non-wall corner from the
+  // corner grid (e.g., wall/wall/wall/floor). No tileset has crosser tiles
+  // for that 3-wall+1-floor pattern, so crosser edges on these tiles would
+  // always be dropped by the solver. Suppress crosser edges on them.
+  // Room-EDGE tiles (cardinally adjacent to rooms) are fine — the solver's
+  // step 1.5 finds "corridor mouth" tiles for 2-wall+2-floor + crosser.
+  const roomCornerTiles = new Set<string>();
+  for (const p of wallOnly) {
+    const isDiagAdj = [[-1,-1],[-1,1],[1,-1],[1,1]].some(
+      ([dx, dy]) => floorTiles.has(`${p.x + dx},${p.y + dy}`)
+    );
+    const isCardAdj = [[0,-1],[0,1],[-1,0],[1,0]].some(
+      ([dx, dy]) => floorTiles.has(`${p.x + dx},${p.y + dy}`)
+    );
+    if (isDiagAdj && !isCardAdj) {
+      roomCornerTiles.add(`${p.x},${p.y}`);
+    }
+  }
+
   // Build crosser path with edge flags.
   // Only generate crosser edges toward other wall tiles in the corridor,
-  // NOT toward room tiles. Room-boundary corners handle the visual transition
-  // between corridor and room without needing crosser edges. Generating
-  // crosser edges toward room tiles causes mismatches because room tiles
-  // (all-floor corners or 2-adjacent-floor corners) lack matching crosser tiles.
-  const wallSet = new Set(wallOnly.map(p => `${p.x},${p.y}`));
-  const path: CrosserPath["path"] = wallOnly.map((p) => {
-    const fullIdx = fullPath.findIndex(fp => fp.x === p.x && fp.y === p.y);
-    const prev = fullIdx > 0 ? fullPath[fullIdx - 1] : null;
-    const next = fullIdx < fullPath.length - 1 ? fullPath[fullIdx + 1] : null;
-    // Only set edge if neighbor is also a wall corridor tile
-    const prevIsWall = prev !== null && wallSet.has(`${prev.x},${prev.y}`);
-    const nextIsWall = next !== null && wallSet.has(`${next.x},${next.y}`);
-    return {
-      x: p.x, y: p.y,
-      edges: {
-        left:   (prevIsWall && prev!.x < p.x) || (nextIsWall && next!.x < p.x) ? true : undefined,
-        right:  (prevIsWall && prev!.x > p.x) || (nextIsWall && next!.x > p.x) ? true : undefined,
-        bottom: (prevIsWall && prev!.y < p.y) || (nextIsWall && next!.y < p.y) ? true : undefined,
-        top:    (prevIsWall && prev!.y > p.y) || (nextIsWall && next!.y > p.y) ? true : undefined,
-      },
-    };
-  });
+  // NOT toward room tiles or room-corner tiles. Room-corner tiles can't
+  // carry crossers (3-wall+1-floor pattern has no crosser tiles), so they
+  // must also be excluded from the wall set used for edge generation.
+  const wallSet = new Set(
+    wallOnly.filter(p => !roomCornerTiles.has(`${p.x},${p.y}`))
+      .map(p => `${p.x},${p.y}`)
+  );
+  const path: CrosserPath["path"] = wallOnly
+    .filter(p => !roomCornerTiles.has(`${p.x},${p.y}`))
+    .map((p) => {
+      const fullIdx = fullPath.findIndex(fp => fp.x === p.x && fp.y === p.y);
+      const prev = fullIdx > 0 ? fullPath[fullIdx - 1] : null;
+      const next = fullIdx < fullPath.length - 1 ? fullPath[fullIdx + 1] : null;
+      // Only set edge if neighbor is also a wall corridor tile (not room-corner)
+      const prevIsWall = prev !== null && wallSet.has(`${prev.x},${prev.y}`);
+      const nextIsWall = next !== null && wallSet.has(`${next.x},${next.y}`);
+      return {
+        x: p.x, y: p.y,
+        edges: {
+          left:   (prevIsWall && prev!.x < p.x) || (nextIsWall && next!.x < p.x) ? true : undefined,
+          right:  (prevIsWall && prev!.x > p.x) || (nextIsWall && next!.x > p.x) ? true : undefined,
+          bottom: (prevIsWall && prev!.y < p.y) || (nextIsWall && next!.y < p.y) ? true : undefined,
+          top:    (prevIsWall && prev!.y > p.y) || (nextIsWall && next!.y > p.y) ? true : undefined,
+        },
+      };
+    });
 
   return { type: crosserType, path };
 }

@@ -11,6 +11,23 @@
  * No fixup cascade needed — transitions are inherent because adjacent tiles
  * share corner grid points. This mirrors how the NWN toolset internally
  * resolves terrain painting.
+ *
+ * TILE MATCHING RULES (from .set file):
+ * The ONLY determining factors for tile selection are:
+ *   - Corner terrains: TopLeft, TopRight, BottomLeft, BottomRight
+ *   - Corner heights: TopLeftHeight, TopRightHeight, BottomLeftHeight, BottomRightHeight
+ *   - Edge crossers: Top, Right, Bottom, Left
+ *   - Orientation: the .set Orientation field (0/90/180/270 degrees)
+ *
+ * The .set file [PRIMARY RULES] and [SECONDARY RULES] sections are NOT used
+ * for tile solving. They are toolset autotiling rules for terrain propagation
+ * and do not restrict tile placement. IGNORE them entirely.
+ *
+ * The .set Orientation field specifies the rotation at which the tile's corners
+ * and crossers are defined. At parse time, corners/crossers are un-rotated to
+ * GIT orientation 0 so the solver can treat all tiles uniformly. The solver
+ * also prefers tiles at their natural .set Orientation (the rotation the model
+ * was designed for) over rotated alternatives with matching corners.
  */
 
 import type { TilesetInfo, TileCorners, TileCrossers } from "./tileset.js";
@@ -275,7 +292,18 @@ export function findTileByCorners(
 
   // Prefer tiles without doors for simpler geometry
   const noDoors = matches.filter(m => tileset.tiles[m.tileId].doors === 0);
-  const pool = noDoors.length > 0 ? noDoors : matches;
+  let pool = noDoors.length > 0 ? noDoors : matches;
+
+  // Prefer tiles at their natural .set Orientation — these tiles were designed
+  // to look correct at this rotation. Tiles at non-natural orientations have
+  // correct corner terrains but their 3D model geometry may not align properly
+  // with neighboring tiles.
+  const natural = pool.filter(m => {
+    const naturalOri = Math.round(tileset.tiles[m.tileId].orientation / 90) % 4;
+    return m.orientation === naturalOri;
+  });
+  if (natural.length > 0) pool = natural;
+
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
