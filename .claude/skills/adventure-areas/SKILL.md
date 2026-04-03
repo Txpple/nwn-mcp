@@ -70,31 +70,22 @@ The table below covers base game tilesets. Other tilesets may exist as custom co
 | Resref | Name | Int/Ext | Notes |
 |--------|------|---------|-------|
 | `tbw01` | Barrows Interior | Int | Burial mounds, barrow tunnels |
-| `tib01` | Beholder Caves | Int | Organic alien caverns |
 | `tno01` | Castle Exterior, Rural | Ext | Fortified keeps, castle walls in countryside |
 | `tic01` | Castle Interior | Int | Throne rooms, storage, library, jail cells |
-| `tni02` | Castle Interior 2 | Int | Extended castle rooms with round tower option |
 | `tcn01` | City Exterior | Ext | Urban streets, docks, castle districts |
 | `tin01` | City Interior | Int | Houses, shops, inns, kitchens |
-| `tni01` | City Interior 2 | Int | Extended house/shop/inn layouts |
 | `tdc01` | Crypt | Int | Tombs, undead lairs, pits |
 | `ttd01` | Desert | Ext | Arid cliffs, sand, chasms |
 | `dag01` | Lizardfolk Interior | Int | Tribal huts, primitive dwellings |
 | `tde01` | Dungeon | Int | Classic dungeon with lava |
-| `tts02` | Early Winter 2 | Ext | Snowy terrain with camp clearings |
 | `ttf01` | Forest | Ext | Woodland paths, cliffs, streams |
-| `ttf02` | Forest - Facelift | Ext | Updated forest visuals, same layout options |
 | `twc03` | Fort Interior | Int | Military interior with water features |
 | `tti01` | Frozen Wastes | Ext | Icy exterior with evil castle structures |
 | `tii01` | Illithid Interior | Int | Mind flayer tunnels |
-| `tcm02` | Medieval City 2 | Ext | Expanded city with trees, grass, castle, water |
-| `trm02` | Medieval Rural 2 | Ext | Expanded rural with sand, mountains, streams |
-| `tms01` | MicroSet | Ext | Test area only, do not use |
 | `tdm01` | Mines and Caverns | Int | Mine shafts, tracks, underground water |
 | `tdr01` | Ruins | Int | Crumbling interior/exterior plaza mix |
 | `ttr01` | Rural | Ext | Farmland, streams, roads, walls |
 | `tts01` | Rural Winter | Ext | Snowy countryside, roads, walls |
-| `trs02` | Rural Winter - Facelift | Ext | Updated rural visuals with mountains |
 | `tdt01` | Sea Caves | Int | Coastal caverns with water; seaside biome only |
 | `tss13` | Sea Ships | Ext | Ship decks, docks, port districts |
 | `tds01` | Sewers | Int | Underground drainage, pits |
@@ -102,6 +93,9 @@ The table below covers base game tilesets. Other tilesets may exist as custom co
 | `ttz01` | Tropical | Ext | Jungle, beaches, sand, water |
 | `ttu01` | Underdark | Ext | Vast underground with faction sectors |
 | `tid01` | Drow Interior | Int | Dark elf architecture |
+
+**Do NOT use these tilesets** — they are DLC/extended versions of original tilesets and are not supported:
+- `tib01` (Beholder Caves), `tni02` (Castle Interior 2), `tni01` (City Interior 2), `tts02` (Early Winter 2), `ttf02` (Forest - Facelift), `tcm02` (Medieval City 2), `trm02` (Medieval Rural 2), `trs02` (Rural Winter - Facelift), `tms01` (MicroSet)
 
 Pick the best match based on:
 1. **Terrain type match** (highest priority)
@@ -113,10 +107,10 @@ Pick the best match based on:
 
 ### Phase 3: Dimensions + Layout Plan
 
-Propose area dimensions based on the plot's description of the location's scale:
-- Small focused area: 10x10 to 12x12
-- Medium area: 14x14 to 16x16
-- Large exploration area: 18x18 to 24x24
+Propose area dimensions based on the plot's description of the location's scale. **Minimum 14x14 for 4 rooms** — the BSP needs 12x12 playable tiles (after 1-tile perimeter) to split into 4 quadrants with 2-tile wall gaps:
+- Small focused area: 14x14 (4 rooms with tight margins)
+- Medium area: 16x16 to 18x18 (4 rooms with room to breathe)
+- Large exploration area: 20x20 to 24x24
 
 **Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually.
 
@@ -127,6 +121,7 @@ Propose area dimensions based on the plot's description of the location's scale:
 2. Read the plot description for this area — what should the player see? A farmstead needs farms, barns, wells. A graveyard needs graves, ruins, crypts. A military camp needs tents, weapons racks, fortifications.
 3. Pick 3-6 group names from the returned list that match the area's narrative purpose. **Order them by best thematic fit — most important/relevant first, descending.** The solver places exactly one feature per BSP room, trying preferred features in the order you provide. Only preferred features are placed — no random filler. With N rooms, at most N features will appear, so put the most essential ones first.
    - **Settlement rule:** For any village, town, city, hamlet, or settlement area, the **first 1-2 preferredFeatures MUST be house/building/dwelling features** (search the group list for "house", "home", "building", "dwelling", "cottage", "hut", "lodge"). A village without houses is obviously wrong. Place thematic variety features (wells, granaries, markets) after houses.
+   - **Banned features:** NEVER use features containing "Chessboard" or "Portal" in any area. These are game-mechanic props that break immersion in adventure areas. Skip them when scanning the feature list.
 4. Pass them as `preferredFeatures` in the style object. **Do NOT omit preferredFeatures** — without it the generator picks random groups and the area will feel incoherent (e.g., Dragon Skeletons in a peaceful farmstead, Evil Temples in a village square).
 
 ```

@@ -363,47 +363,9 @@ export function generateLayout(
     }
   }
 
-  // ── 7b. Convert short interior corridors to floor zones ────────────────────
-  // buildCrosserGrid strips crossers from tiles adjacent to rooms (non-default
-  // corners). For corridors ≤ 2 tiles, ALL tiles get stripped → no walkable path.
-  // Fix: convert those tiles to floor zones instead of crosser paths.
-  // Then strip those floor tiles from remaining crosser paths (floor + crosser
-  // edges = unsolvable on most interior tilesets). Iterate until stable.
-  if (!isExterior) {
-    let changed = true;
-    while (changed) {
-      changed = false;
-      // Find and remove short corridors
-      for (let i = crossers.length - 1; i >= 0; i--) {
-        if (crossers[i].path.length <= 2) {
-          const removed = crossers.splice(i, 1)[0];
-          const tiles: Array<{ x: number; y: number }> = [];
-          for (const p of removed.path) {
-            const key = `${p.x},${p.y}`;
-            if (!floorTiles.has(key)) {
-              tiles.push({ x: p.x, y: p.y });
-              floorTiles.add(key);
-            }
-          }
-          if (tiles.length > 0) zones.push({ terrain: floorTerrain, tiles });
-          changed = true;
-        }
-      }
-      // Strip floor tiles from remaining crosser paths
-      for (const cx of crossers) {
-        const before = cx.path.length;
-        cx.path = cx.path.filter(p => !floorTiles.has(`${p.x},${p.y}`));
-        if (cx.path.length !== before) changed = true;
-      }
-      // Remove empty paths
-      for (let i = crossers.length - 1; i >= 0; i--) {
-        if (crossers[i].path.length === 0) {
-          crossers.splice(i, 1);
-          changed = true;
-        }
-      }
-    }
-  }
+  // Short interior corridors are no longer collapsed to floor zones.
+  // With minLeaf=6 and margin>=2, corridors always span 3+ wall tiles,
+  // so crosser stripping in buildCrosserGrid leaves enough tiles for walkable paths.
 
   // ── 8. Secondary crosser (stream/river) — interior only ──────────────────
   // Exterior styles use terrain corridors, so crossers would cut into wall
@@ -435,18 +397,17 @@ export function generateLayout(
 
 function bspPartition(x: number, y: number, w: number, h: number,
                       targetRooms: number, config: StyleConfig): Room[] {
-  // Minimum leaf = 4 tiles (allows 3-tile room + 1 margin on each side when margin=1,
-  // or fits a 3-tile room with margin=0 on one side). This lets a 10x10 area (8x8 playable)
-  // split into 4 rooms instead of 1.
-  const minLeaf = 4;
+  // Minimum leaf = 6 tiles (room 3 + margin 2 on one side + 1 buffer).
+  // Guarantees 2-tile wall gaps between adjacent rooms for visual separation.
+  // A 12x12 area (10x10 playable) splits into 4 leaves of 5x5 each.
+  const minLeaf = 6;
   const canSplitH = h >= minLeaf * 2;
   const canSplitW = w >= minLeaf * 2;
 
   if (targetRooms <= 1 || (!canSplitH && !canSplitW)) {
     const [minM, maxM] = config.marginRange;
-    // Use margin of 1 when leaf is tight (< 8 tiles), normal margin otherwise
-    const tightLeaf = w < 8 || h < 8;
-    const margin = tightLeaf ? 1 : Math.max(2, minM + Math.floor(Math.random() * (maxM - minM + 1)));
+    // Always enforce minimum margin of 2 for room separation — never collapse to 1
+    const margin = Math.max(2, minM + Math.floor(Math.random() * (maxM - minM + 1)));
     const availW = Math.max(3, w - margin * 2);
     const availH = Math.max(3, h - margin * 2);
     const sizeFrac = config.roomSizeRange[0] +
@@ -638,18 +599,27 @@ function connectRooms(
   const wallOnly = fullPath.filter(p => !floorTiles.has(`${p.x},${p.y}`));
   if (wallOnly.length === 0) return null;
 
-  // Build crosser path with edge flags
+  // Build crosser path with edge flags.
+  // Only generate crosser edges toward other wall tiles in the corridor,
+  // NOT toward room tiles. Room-boundary corners handle the visual transition
+  // between corridor and room without needing crosser edges. Generating
+  // crosser edges toward room tiles causes mismatches because room tiles
+  // (all-floor corners or 2-adjacent-floor corners) lack matching crosser tiles.
+  const wallSet = new Set(wallOnly.map(p => `${p.x},${p.y}`));
   const path: CrosserPath["path"] = wallOnly.map((p) => {
     const fullIdx = fullPath.findIndex(fp => fp.x === p.x && fp.y === p.y);
     const prev = fullIdx > 0 ? fullPath[fullIdx - 1] : null;
     const next = fullIdx < fullPath.length - 1 ? fullPath[fullIdx + 1] : null;
+    // Only set edge if neighbor is also a wall corridor tile
+    const prevIsWall = prev !== null && wallSet.has(`${prev.x},${prev.y}`);
+    const nextIsWall = next !== null && wallSet.has(`${next.x},${next.y}`);
     return {
       x: p.x, y: p.y,
       edges: {
-        left:   (prev !== null && prev.x < p.x) || (next !== null && next.x < p.x) ? true : undefined,
-        right:  (prev !== null && prev.x > p.x) || (next !== null && next.x > p.x) ? true : undefined,
-        bottom: (prev !== null && prev.y < p.y) || (next !== null && next.y < p.y) ? true : undefined,
-        top:    (prev !== null && prev.y > p.y) || (next !== null && next.y > p.y) ? true : undefined,
+        left:   (prevIsWall && prev!.x < p.x) || (nextIsWall && next!.x < p.x) ? true : undefined,
+        right:  (prevIsWall && prev!.x > p.x) || (nextIsWall && next!.x > p.x) ? true : undefined,
+        bottom: (prevIsWall && prev!.y < p.y) || (nextIsWall && next!.y < p.y) ? true : undefined,
+        top:    (prevIsWall && prev!.y > p.y) || (nextIsWall && next!.y > p.y) ? true : undefined,
       },
     };
   });

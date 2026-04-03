@@ -92,7 +92,7 @@ All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets
 
 #### Layout Rules
 
-- **BSP rooms**: minimum 3x3, margin >= 2 (4-tile wall gaps). Split threshold and variance controlled by style config. Room size is a random fraction of available leaf space, randomly offset within the leaf.
+- **BSP rooms**: minimum 3x3, margin >= 2 (enforced, never collapses to 1). `minLeaf = 6` ensures each leaf can fit a 3-tile room + 2-tile margin. Minimum area for 4 rooms is 14x14 (12x12 playable). Split threshold and variance controlled by style config. Room size is a random fraction of available leaf space, randomly offset within the leaf.
 - **L-shaped rooms**: Adjacent BSP siblings may merge into a single zone with probability `nonRectChance`. The zone solver handles arbitrary shapes.
 - **Corridor routing**: axis-overlap detection (straight connection at shared Y/X), L-bend fallback when rooms don't overlap on either axis.
 - **S-curves**: Probability controlled by `sCurveChance`. Offsets middle third by 1 tile perpendicular. Bends only on interior wall tiles (never first/last).

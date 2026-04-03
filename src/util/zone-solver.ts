@@ -197,27 +197,17 @@ export function buildCrosserGrid(
     return bl !== defaultTerrain || br !== defaultTerrain || tl !== defaultTerrain || tr !== defaultTerrain;
   };
 
-  // Strip crosser edges from tiles with non-default corners.
-  // Corridor tiles adjacent to rooms share corner positions with room tiles,
-  // inheriting floor corners. Most tilesets lack tiles with mixed floor corners
-  // + corridor crossers (e.g., tdm01 has no 2-adjacent-floor + corridor tile).
-  // Stripping crossers from these edge tiles lets them solve as regular
-  // transition tiles, while pure-wall corridor tiles keep their crossers.
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (hasNonDefaultCorner(x, y)) {
-        const entry = grid[y * width + x];
-        entry.top = "";
-        entry.right = "";
-        entry.bottom = "";
-        entry.left = "";
-      }
-    }
-  }
+  // Do NOT strip crossers from tiles with non-default corners. Tilesets have
+  // "corridor mouth" tiles (e.g., tdm01 tile 48: floor/wall/floor/wall + R:corridor,
+  // tin01 tile 14: livingroom/wall/livingroom/wall + R:corridor) that correctly
+  // render a corridor entering a room. The solver's fallback chain handles cases
+  // where no matching tile exists: step 1 tries exact corners+crossers, step 2
+  // drops crossers if no match. Preemptive stripping prevented corridor-mouth
+  // tiles from being found, causing crosser mismatches at room boundaries.
 
   // Propagate crossers across shared edges between default-corner tiles only.
-  // Never propagate onto tiles with non-default corners — those had their
-  // crossers stripped above and shouldn't get new ones.
+  // Non-default-corner tiles keep only the crossers explicitly placed by path
+  // segments — no propagation onto them from adjacent corridor tiles.
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
@@ -422,6 +412,58 @@ export function solveArea(
       // Step 1: exact corners + exact crossers
       let placement = findTileByCorners(wantCorners, wantCrossers, tileset);
       let warnMsg = "";
+
+      // Step 1.5: adjust free corners + keep crossers.
+      // Corridor-mouth tiles (e.g., tdm01 tile 48: floor/wall/floor/wall + R:corridor)
+      // have specific corner patterns. When a corridor meets a room edge, the
+      // original corners may have 2 adjacent floor corners (e.g., wall/wall/floor/floor)
+      // which has no corridor tile. Adjusting one floor corner to wall yields a
+      // pattern like wall/wall/wall/floor or wall/wall/floor/wall that DOES have
+      // corridor-mouth tiles. This preserves the crosser connection at the cost of
+      // a small room-edge "dent".
+      if (!placement && hasCrs) {
+        const adjustable = getFreeCorners(x, y, cw, featureLockedCorners);
+        if (adjustable.length > 0) {
+          // Try adjusting 1 corner
+          for (const adj of adjustable) {
+            for (const terrain of allowedTerrains) {
+              if (terrain === wantCorners[adj.key]) continue;
+              const modified = { ...wantCorners, [adj.key]: terrain };
+              placement = findTileByCorners(modified, wantCrossers, tileset);
+              if (placement) {
+                cornerGrid[adj.gridIdx] = terrain;
+                warnMsg = `Adjusted ${adj.key}: ${wantCorners[adj.key]}→${terrain} (crossers preserved)`;
+                break;
+              }
+            }
+            if (placement) break;
+          }
+
+          // Try adjusting 2 corners
+          if (!placement && adjustable.length >= 2) {
+            let found = false;
+            for (let i = 0; i < adjustable.length && !found; i++) {
+              for (let j = i + 1; j < adjustable.length && !found; j++) {
+                for (const t1 of allowedTerrains) {
+                  for (const t2 of allowedTerrains) {
+                    if (t1 === wantCorners[adjustable[i].key] && t2 === wantCorners[adjustable[j].key]) continue;
+                    const modified = { ...wantCorners, [adjustable[i].key]: t1, [adjustable[j].key]: t2 };
+                    placement = findTileByCorners(modified, wantCrossers, tileset);
+                    if (placement) {
+                      cornerGrid[adjustable[i].gridIdx] = t1;
+                      cornerGrid[adjustable[j].gridIdx] = t2;
+                      warnMsg = `Adjusted ${adjustable[i].key}→${t1}, ${adjustable[j].key}→${t2} (crossers preserved)`;
+                      found = true;
+                      break;
+                    }
+                  }
+                  if (found) break;
+                }
+              }
+            }
+          }
+        }
+      }
 
       // Step 2: exact corners + no crossers
       if (!placement) {
