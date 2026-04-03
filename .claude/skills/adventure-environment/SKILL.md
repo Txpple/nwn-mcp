@@ -186,6 +186,23 @@ Facing should point toward the landmark from the player's likely approach direct
 
 ---
 
+### Phase 5b: Room Coverage Check
+
+After placing all placeables, sounds, and waypoints in an area, verify every room/clearing has at least one point of interest.
+
+1. Call `visualize_area` and examine the `zones` array. Each zone with 2+ tiles that isn't a corridor (1 tile wide) is a room or clearing.
+2. For each room/clearing zone, check if any placed object (placeable, waypoint, creature) falls within its tile bounds (object world position / 10 = tile coordinate).
+3. If a room/clearing has **no objects at all**:
+   - For interiors: place a thematic placeable (table, barrel, brazier, bookshelf, weapon rack)
+   - For exteriors: place a thematic placeable (rock formation, campfire ring, bush cluster, fallen log)
+   - For dungeons/crypts: place a thematic placeable (bones, coffin, altar, rubble pile)
+   - Make the placeable Useable with a brief flavor description via `modify_gff_field` on `Description`
+4. Skip narrow corridors (1 tile wide in both dimensions) — these are passages, not rooms.
+
+This ensures the player always finds something interesting in every reachable space.
+
+---
+
 ### Phase 6: Update adventure.md
 
 Append an `## Environment` section to `adventure.md` with this structure per area:

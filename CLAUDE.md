@@ -92,7 +92,7 @@ All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets
 
 #### Layout Rules
 
-- **BSP rooms**: minimum 3x3, margin >= 2 (enforced, never collapses to 1). `minLeaf = 6` ensures each leaf can fit a 3-tile room + 2-tile margin. Minimum area for 4 rooms is 14x14 (12x12 playable). Split threshold and variance controlled by style config. Room size is a random fraction of available leaf space, randomly offset within the leaf.
+- **BSP rooms**: minimum 3x3, margin >= 2 (enforced, never collapses to 1). `minLeaf = 6` ensures each leaf can fit a 3-tile room + 2-tile margin. Interior styles use `splitThreshold: 10` — minimum area for 4 rooms is 14x14 (12x12 playable). Exterior styles use `splitThreshold: 12` and `marginRange: [2, 2]` to guarantee rooms large enough for 2x3 building features — minimum area for 4 exterior rooms is 18x18 (16x16 playable). Room size is a random fraction of available leaf space, randomly offset within the leaf.
 - **L-shaped rooms**: Adjacent BSP siblings may merge into a single zone with probability `nonRectChance`. The zone solver handles arbitrary shapes.
 - **Corridor routing**: axis-overlap detection (straight connection at shared Y/X), L-bend fallback when rooms don't overlap on either axis.
 - **S-curves**: Probability controlled by `sCurveChance`. Offsets middle third by 1 tile perpendicular. Bends only on interior wall tiles (never first/last).
@@ -103,7 +103,7 @@ All 10 styles use a single BSP pipeline, differentiated by `StyleConfig` presets
 - **Propagation guard**: crossers don't propagate onto tiles with any non-default corner (boundary or room tiles). Only pure-default tiles receive propagated crossers.
 - **Room-corner crosser exclusion**: tiles diagonally adjacent to rooms (but NOT cardinally adjacent) are excluded from corridor crosser paths. These tiles get a single non-wall corner from the corner grid (3-wall+1-floor pattern) and no tileset has crosser tiles for that pattern. Room-EDGE tiles (cardinally adjacent) are kept — the solver's step 1.5 finds corridor-mouth tiles for them.
 - **Solver scan-order**: solves bottom-to-top, left-to-right. Fallback chain: (1) exact corners+crossers, (1.5) adjust free corners+keep crossers, (2) exact corners+drop crossers, (3) adjust free corners+drop crossers, (4) all-default fallback. Step 1.5 finds "corridor mouth" tiles by adjusting room-edge corners. Adjustments are written back to the corner grid so downstream tiles see them.
-- **Feature group filters**: groups with door tiles, crosser edges, or mismatched terrain corners are excluded from feature packing and `adventure_apply_layout`. Door geometry and crosser edges on feature tiles conflict with the solver's grids. Terrain mismatch means a feature tile's corners don't all match the room's floor terrain — placing such a feature locks foreign corners into the grid, creating visual seams and forcing solver fallbacks on neighboring tiles.
+- **Feature group filters**: groups with crosser edges or mismatched terrain corners are excluded from feature packing and `adventure_apply_layout`. Door-containing groups are allowed **only if** every door tile has all corners matching the floor terrain and no crosser edges — this lets freestanding buildings (houses, lodges) pass while rejecting corridor doors and transition doors. Terrain mismatch means a feature tile's corners don't all match the room's floor terrain — placing such a feature locks foreign corners into the grid, creating visual seams and forcing solver fallbacks on neighboring tiles.
 - **Feature suggestions**: `suggestedFeatures` array in LayoutResult — packed into rooms targeting 50%+ tile coverage. `adventure_apply_layout` applies zones + crossers + features atomically. Pass `preferredFeatures` (array of group names from `get_tileset_details`) in `LayoutStyle` to prioritize plot-appropriate features over random selection.
 
 ### Resource Loading
@@ -175,7 +175,7 @@ Three mechanisms for moving between areas:
 
 ## Placement Collision Detection
 
-`place_creature` and `place_placeable` check for nearby objects within 1m radius. Returns `collisionWarning` in the response JSON when objects would overlap. Informational only — does not block placement.
+`place_creature` (0.75m radius) and `place_placeable` (1.0m radius) check for nearby objects and **block placement** if another object is within range. The `collisionRadius` parameter on `place_creature` allows callers to override (pass `"0"` to disable).
 
 ## Walkability Enforcement
 

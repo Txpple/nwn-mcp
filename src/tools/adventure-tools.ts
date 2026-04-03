@@ -29,7 +29,7 @@ import { snapshotGitForUndo } from "../util/undo.js";
 import { compileScript, jsonToGff, erfPack } from "../nim-tools.js";
 import { checkPlacementWalkable } from "../util/walkmesh.js";
 import { getTilesetInfo } from "../util/tileset.js";
-import { generateLayout, groupHasDoors, groupHasCrossers, groupMatchesTerrain, resolveFloorTerrain } from "../util/layout-generator.js";
+import { generateLayout, groupHasUnsupportedDoors, groupHasCrossers, groupMatchesTerrain, resolveFloorTerrain } from "../util/layout-generator.js";
 import type { LayoutStyle, SuggestedFeature } from "../util/layout-generator.js";
 import { solveArea } from "../util/zone-solver.js";
 import type { TerrainZone, CrosserPath, FeatureTile } from "../util/zone-solver.js";
@@ -514,16 +514,25 @@ export function registerAdventureTools(server: McpServer): void {
       const featureWarnings: string[] = [];
       const featureGroups: string[] = [];
 
+      // Build a tile→terrain lookup from zones for per-feature floor terrain resolution
+      const tileTerrainMap = new Map<string, string>();
+      for (const z of zones as TerrainZone[]) {
+        for (const t of z.tiles) {
+          tileTerrainMap.set(`${t.x},${t.y}`, z.terrain.toLowerCase());
+        }
+      }
+
       for (const sf of suggestedFeatures) {
         const group = tileset.groups.find(g => g.name.toLowerCase() === sf.feature.toLowerCase());
         if (!group) {
           featureWarnings.push(`Group not found: ${sf.feature}`);
           continue;
         }
-        // Reject groups that contain door tiles — doors require manual placement and break layout
-        const hasDoors = group.tileIds.some(id => id >= 0 && tileset.tiles[id]?.doors > 0);
-        if (hasDoors) {
-          featureWarnings.push(`${sf.feature}: skipped (contains door tiles — use place_door instead)`);
+        // Determine the floor terrain from the zone this feature sits in
+        const featureFloor = tileTerrainMap.get(`${sf.x},${sf.y}`) ?? tileset.defaultTerrain.toLowerCase();
+        // Reject groups whose door tiles sit on terrain transitions or crosser edges
+        if (groupHasUnsupportedDoors(group, tileset, featureFloor)) {
+          featureWarnings.push(`${sf.feature}: skipped (door tiles on terrain transition or crosser edge)`);
           continue;
         }
         // Reject groups that contain crosser references — crossers on feature tiles
@@ -672,7 +681,7 @@ export function registerAdventureTools(server: McpServer): void {
       const allowed = tilesetInfo.groups
         .filter(g =>
           g.tileIds.some(id => id >= 0) &&
-          !groupHasDoors(g, tilesetInfo) &&
+          !groupHasUnsupportedDoors(g, tilesetInfo, floorTerrain) &&
           !groupHasCrossers(g, tilesetInfo) &&
           groupMatchesTerrain(g, tilesetInfo, floorTerrain))
         .map(g => ({ name: g.name, columns: g.columns, rows: g.rows }));

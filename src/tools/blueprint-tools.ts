@@ -50,9 +50,10 @@ export function registerBlueprintTools(server: McpServer): void {
       feats: z.string().optional().describe("JSON array of feat IDs (integers). Replaces FeatList."),
       spells: z.string().optional().describe("JSON array of {spell, level} objects. Sets SpecAbilityList (spell-like abilities). spell=spells.2da row, level=caster level."),
       equipment: z.string().optional().describe("JSON object mapping slot names to item resrefs. Resolves from base game/HAKs. Slots: head, chest, boots, arms, righthand, lefthand, cloak, leftring, rightring, neck, belt, arrows, bullets, bolts"),
+      inventory: z.string().optional().describe("JSON array of carried (non-equipped) items: [{resref: 'nw_waxhn001', quantity?: 1}]. Dropped on death if creature is lootable."),
       lootable: z.boolean().optional().describe("Whether the creature leaves a lootable corpse (default false)"),
     },
-    async ({ resref, tag, name, sourceResref, appearance, faction, cr, hp, race, gender, conversation, str, dex, con, int: intStat, wis, cha, naturalAC, classes, feats, spells, equipment, lootable }) => {
+    async ({ resref, tag, name, sourceResref, appearance, faction, cr, hp, race, gender, conversation, str, dex, con, int: intStat, wis, cha, naturalAC, classes, feats, spells, equipment, inventory, lootable }) => {
       const index = requireIndex();
       const resrefLower = resref.toLowerCase();
       const key = `${resrefLower}.utc`;
@@ -186,6 +187,7 @@ export function registerBlueprintTools(server: McpServer): void {
           }
           const itemObj = itemDoc as GffObj;
           itemObj.__struct_id = slotId;
+          setField(itemObj, "Dropable", "byte", 1);
           equipList.push(itemObj);
         }
 
@@ -194,6 +196,38 @@ export function registerBlueprintTools(server: McpServer): void {
         if (failedItems.length > 0) {
           // Still create the creature, just warn about missing items
           console.error(`Equipment warnings for ${resrefLower}: ${failedItems.join(", ")}`);
+        }
+      }
+
+      // Inventory — carried (non-equipped) items, dropped on death if lootable
+      if (inventory) {
+        const parsed: Array<{ resref: string; quantity?: number }> = JSON.parse(inventory);
+        const itemList: GffObj[] = [];
+        const failedInv: string[] = [];
+
+        for (let i = 0; i < parsed.length; i++) {
+          const { resref: itemResref, quantity } = parsed[i];
+          const itemDoc = await resolveBlueprint(index, itemResref, "uti", resmanOpts!);
+          if (!itemDoc) {
+            failedInv.push(`Item not found: ${itemResref}.uti`);
+            continue;
+          }
+          const itemObj = itemDoc as GffObj;
+          itemObj.__struct_id = 0;
+          setField(itemObj, "Dropable", "byte", 1);
+          setField(itemObj, "Identified", "byte", 1);
+          setField(itemObj, "Repos_PosX", "word", itemList.length % 6);
+          setField(itemObj, "Repos_Posy", "word", Math.floor(itemList.length / 6));
+          if (quantity && quantity > 1) {
+            setField(itemObj, "StackSize", "word", quantity);
+          }
+          itemList.push(itemObj);
+        }
+
+        obj.ItemList = { type: "list", value: itemList };
+
+        if (failedInv.length > 0) {
+          console.error(`Inventory warnings for ${resrefLower}: ${failedInv.join(", ")}`);
         }
       }
 

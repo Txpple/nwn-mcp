@@ -285,6 +285,38 @@ Examples:
 
 ---
 
+### Phase 5b: Win State
+
+Create a victory sequence that fires when the player completes the primary quest's final objective.
+
+1. **Identify the final dialog node.** Find the dialog and node whose action script calls `AddJournalQuestEntry` with the primary quest's `end=true` entry. Use `flatten_dialog` and `read_script_source` to trace it.
+
+2. **Write the win-state script.** If the final node already has an action script, read it with `read_script_source`, then rewrite it via `write_script` with the win-state logic appended **after** the existing `AddJournalQuestEntry` call. If it has no action script, create a new one named `a_mod_win`.
+
+   The win-state logic (append to the end of `main()`):
+   ```nwscript
+   // === Victory sequence ===
+   object oPC = GetPCSpeaker();
+   if (!GetIsPC(oPC)) oPC = GetFirstPC();
+   if (GetIsObjectValid(oPC))
+   {
+       AssignCommand(oPC, PlaySound("gui_quest_done"));
+       ApplyEffectToObject(DURATION_TYPE_INSTANT,
+           EffectVisualEffect(VFX_FNF_SUMMON_CELESTIAL), oPC);
+       FloatingTextStringOnCreature("*** ADVENTURE COMPLETE ***", oPC, FALSE);
+       DelayCommand(3.0, SendMessageToPC(oPC,
+           "[Custom congratulations message matching the adventure's tone and plot]"));
+   }
+   ```
+
+3. **Adapt the message.** Replace the bracketed text with a 1-2 sentence congratulations that references the adventure's story (e.g., "The ancient evil is sealed. Millhaven owes you its survival."). Keep it short and thematic.
+
+4. **Attach the script.** If you created a new script, use `edit_dialog_node` to set it as the action script on the final dialog node.
+
+5. **Verify compilation.** Ensure `write_script` reports success. If compilation fails, fix syntax and retry (max 2 attempts).
+
+---
+
 ### Phase 6: Verify
 
 1. **`get_journal`** — verify all quests have XP values set. Print quest tag and XP for each.

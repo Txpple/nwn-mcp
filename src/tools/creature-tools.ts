@@ -228,6 +228,7 @@ export function registerCreatureTools(server: McpServer): void {
         const itemObj = itemDoc as GffObj;
         delete itemObj.__data_type;
         itemObj.__struct_id = slotId;
+        setField(itemObj, "Dropable", "byte", 1);
 
         // Remove existing item in this slot (merge mode)
         if (!replace) {

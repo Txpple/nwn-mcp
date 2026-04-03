@@ -198,6 +198,19 @@ Repeat for each root entry missing the option.
 
 ---
 
+### Phase 5b: Room Coverage Audit
+
+For each area, call `visualize_area` and identify all walkable zones spanning 2+ tiles in both dimensions. Check if each zone contains at least one object (creature, placeable, waypoint, door, or transition portal).
+
+For any empty room/clearing:
+- Place a thematic placeable appropriate to the area's setting (barrel, crate, brazier for interiors; rock, bush, campfire for exteriors)
+- Set `Useable=1` via `modify_gff_field` and add a brief flavor `Description`
+- Log each addition
+
+Skip narrow corridors (1 tile wide). This is a safety net for gaps missed by `/adventure-environment`.
+
+---
+
 ### Phase 6: Challenge Placement Audit
 
 For each area marked as dangerous in `## Areas`:

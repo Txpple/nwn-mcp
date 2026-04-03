@@ -131,9 +131,19 @@ export function registerPlacementTools(server: McpServer): void {
       // Append to GIT Creature List
       const { doc: gitDoc, obj: git } = getGitDoc(index, area);
 
-      // Collision detection (warning, not blocking)
-      const colRadius = collisionRadius !== undefined ? toF(collisionRadius) : undefined;
-      const collision = colRadius === 0 ? { collision: false } as const : checkCollision(git, xN, yN, colRadius);
+      // Collision detection (blocking — matches placeable behavior)
+      const colRadius = collisionRadius !== undefined ? toF(collisionRadius) : 0.75;
+      if (colRadius > 0) {
+        const collision = checkCollision(git, xN, yN, colRadius);
+        if (collision.collision) {
+          return {
+            content: [{
+              type: "text",
+              text: `Placement blocked: '${collision.nearbyTag}' is ${collision.distance}m away (minimum ${colRadius}m). Choose a different position.`,
+            }],
+          };
+        }
+      }
 
       snapshotGitForUndo(gitDoc, area, "place_creature", `Place creature ${blueprint}`);
       const creatureList = getFieldList(git, "Creature List");
@@ -154,9 +164,6 @@ export function registerPlacementTools(server: McpServer): void {
             blueprint,
             position: { x: xN, y: yN, z: zN },
             bearing: bearingN,
-            ...(collision.collision && {
-              collisionWarning: `Object '${collision.nearbyTag}' is ${collision.distance}m away — objects may overlap`,
-            }),
           }, null, 2),
         }],
       };
@@ -798,6 +805,7 @@ export function registerPlacementTools(server: McpServer): void {
         setField(itemObj, "Repos_PosX", "word", slot % 6);
         setField(itemObj, "Repos_Posy", "word", Math.floor(slot / 6));
         setField(itemObj, "Identified", "byte", 1);
+        setField(itemObj, "Dropable", "byte", 1);
 
         if (quantity && quantity > 1) {
           setField(itemObj, "StackSize", "word", quantity);

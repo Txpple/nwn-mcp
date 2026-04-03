@@ -113,66 +113,66 @@ const STYLE_PRESETS: Record<string, StyleConfig> = {
   },
   // ─── Exterior styles ───
   forest: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.5, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.5, nonRectChance: 0.0,
     wallKeywords: ["cliff", "trees", "rocky", "mountain"],
     floorKeywords: ["grass", "dirt", "clearing", "floor", "forest"],
     crosserKeywords: ["road", "path", "trail"],
-    obstacleKeywords: ["cliff", "pit"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["cliff", "trees", "rocky", "mountain"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: ["stream", "river"], secondaryCrosserChance: 0.5,
   },
   rural: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
     wallKeywords: ["trees", "cliff", "rocky", "mountain"],
     floorKeywords: ["grass", "snow", "sand", "dirt", "clearing"],
     crosserKeywords: ["road", "path", "trail", "street"],
-    obstacleKeywords: ["trees", "water"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["trees", "cliff", "rocky", "mountain"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: ["stream", "river"], secondaryCrosserChance: 0.4,
   },
   city: {
     splitVariance: 0.05, marginRange: [2, 2], roomSizeRange: [0.85, 1.0],
-    splitThreshold: 10, shortcutCount: 0, sCurveChance: 0.1, nonRectChance: 0.0,
+    splitThreshold: 12, shortcutCount: 0, sCurveChance: 0.1, nonRectChance: 0.0,
     wallKeywords: ["building", "castle", "wall", "trees"],
     floorKeywords: ["cobble", "stone", "floor", "grass"],
     crosserKeywords: ["road", "street", "path"],
-    obstacleKeywords: ["water"], obstacleChance: 0.3, obstacleSize: [1, 2],
+    obstacleKeywords: ["building", "castle", "wall"], obstacleChance: 0.3, obstacleSize: [1, 2],
     secondaryCrosserKeywords: [], secondaryCrosserChance: 0,
   },
   plains: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
     wallKeywords: ["cliff", "mountain", "rocky", "trees"],
     floorKeywords: ["grass", "sand", "dirt"],
     crosserKeywords: ["road", "path", "trail", "ridge"],
-    obstacleKeywords: ["trees", "chasm", "mountain"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["cliff", "mountain", "rocky", "trees"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: ["stream", "river"], secondaryCrosserChance: 0.3,
   },
   desert: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
     wallKeywords: ["cliff", "rocky", "mountain"],
     floorKeywords: ["desert", "sand", "dirt"],
     crosserKeywords: ["road", "trench", "path"],
-    obstacleKeywords: ["cliff", "chasm"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["cliff", "rocky", "mountain"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: [], secondaryCrosserChance: 0,
   },
   castle: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
     wallKeywords: ["castlewall", "cliff", "wall", "trees"],
     floorKeywords: ["grass", "dirt", "cobble"],
     crosserKeywords: ["road", "path", "lists"],
-    obstacleKeywords: ["trees", "water", "cliff"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["castlewall", "cliff", "wall", "trees"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: ["river", "stream"], secondaryCrosserChance: 0.2,
   },
   tundra: {
-    splitVariance: 0.15, marginRange: [2, 3], roomSizeRange: [0.6, 1.0],
-    splitThreshold: 10, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
+    splitVariance: 0.15, marginRange: [2, 2], roomSizeRange: [0.6, 1.0],
+    splitThreshold: 12, shortcutCount: 1, sCurveChance: 0.3, nonRectChance: 0.0,
     wallKeywords: ["trees", "cliff", "rocky", "mountain"],
     floorKeywords: ["snow", "camp", "dirt", "floor"],
     crosserKeywords: ["road", "path", "trail"],
-    obstacleKeywords: ["trees", "water"], obstacleChance: 0.6, obstacleSize: [1, 3],
+    obstacleKeywords: ["trees", "cliff", "rocky", "mountain"], obstacleChance: 0.6, obstacleSize: [1, 3],
     secondaryCrosserKeywords: ["stream"], secondaryCrosserChance: 0.2,
   },
 };
@@ -714,11 +714,21 @@ function connectRoomsWinding(a: Room, b: Room, crosserType: string, curvature: n
 
 // ─── Feature packing (mandatory — 50%+ tile coverage per room) ──────────────
 
-export function groupHasDoors(group: { tileIds: number[] }, tileset: TilesetInfo): boolean {
+/** Reject groups whose door tiles sit on terrain transitions or crosser edges.
+ *  Freestanding buildings (all corners + edges match floor terrain) pass through. */
+export function groupHasUnsupportedDoors(group: { tileIds: number[] }, tileset: TilesetInfo, floorTerrain: string): boolean {
+  const lc = floorTerrain.toLowerCase();
   for (const tileId of group.tileIds) {
     if (tileId < 0) continue;
     const tile = tileset.tiles[tileId];
-    if (tile && tile.doors > 0) return true;
+    if (!tile || tile.doors === 0) continue;
+    // This tile has doors — check that ALL corners and ALL crosser edges are floor-only
+    if (tile.corners.topLeft.toLowerCase() !== lc ||
+        tile.corners.topRight.toLowerCase() !== lc ||
+        tile.corners.bottomLeft.toLowerCase() !== lc ||
+        tile.corners.bottomRight.toLowerCase() !== lc) return true;
+    if (tile.crossers.top || tile.crossers.right ||
+        tile.crossers.bottom || tile.crossers.left) return true;
   }
   return false;
 }
@@ -766,11 +776,11 @@ function packFeatures(
   for (let i = 0; i < rooms.length; i++) {
     const room = rooms[i];
 
-    // Get all groups that have valid tile IDs, exclude groups with doors, crossers,
-    // or mismatched terrain corners
+    // Get all groups that have valid tile IDs, exclude groups with unsupported doors,
+    // crossers, or mismatched terrain corners
     const validGroups = tileset.groups
       .filter(g => g.tileIds.some(id => id >= 0)
-        && !groupHasDoors(g, tileset)
+        && !groupHasUnsupportedDoors(g, tileset, floorTerrain)
         && !groupHasCrossers(g, tileset)
         && groupMatchesTerrain(g, tileset, floorTerrain));
 

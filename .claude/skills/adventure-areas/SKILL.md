@@ -107,17 +107,18 @@ Pick the best match based on:
 
 ### Phase 3: Dimensions + Layout Plan
 
-Propose area dimensions based on the plot's description of the location's scale. **Minimum 14x14 for 4 rooms** — the BSP needs 12x12 playable tiles (after 1-tile perimeter) to split into 4 quadrants with 2-tile wall gaps:
-- Small focused area: 14x14 (4 rooms with tight margins)
-- Medium area: 16x16 to 18x18 (4 rooms with room to breathe)
-- Large exploration area: 20x20 to 24x24
+Propose area dimensions based on the plot's description of the location's scale. Interior and exterior areas have different minimums due to exterior styles needing larger rooms for building features (2x2, 2x3 houses etc.):
+- **Interior** — minimum 14x14 for 4 rooms (splitThreshold 10)
+- **Exterior** — minimum 18x18 for 4 rooms (splitThreshold 12, needs larger leaves for 2x3 features)
+- Medium area: 18x18 to 22x22
+- Large exploration area: 22x22 to 26x26
 
 **Preferred approach: Use `adventure_generate_layout`** to get a server-generated layout with zones, crossers, and transition points. This tool encodes all the layout rules (perimeter encapsulation, room separation, adjacency chains, walkable ratio) so you don't need to reason about them manually.
 
 **Available styles:** `dungeon` (rooms + corridor crossers), `cave` (organic chambers + corridors), `dwelling` (quadrant rooms, building interior), `forest` (clearings in cliff/trees), `rural` (farmland clearings in trees), `city` (urban spaces), `plains` (open terrain, sparse clearings), `desert` (arid, cliff borders), `castle` (fortified exterior, castle walls), `tundra` (frozen, snow clearings).
 
 **MANDATORY: Choose thematic features BEFORE generating layouts.**
-1. Call `adventure_list_features` with the tileset resref and style type (e.g., `style: "rural"`, `style: "cave"`, `style: "forest"`). The tool automatically resolves the correct floor terrain and returns ONLY groups safe for the solver — doors, crosser edges, and terrain-mismatched groups are already filtered out.
+1. Call `adventure_list_features` with the tileset resref and style type (e.g., `style: "rural"`, `style: "cave"`, `style: "forest"`). The tool automatically resolves the correct floor terrain and returns ONLY groups safe for the solver — crosser edges and terrain-mismatched groups are filtered out. Freestanding building features (houses, lodges) with doors ARE allowed if all their tiles sit on uniform floor terrain.
 2. Read the plot description for this area — what should the player see? A farmstead needs farms, barns, wells. A graveyard needs graves, ruins, crypts. A military camp needs tents, weapons racks, fortifications.
 3. Pick 3-6 group names from the returned list that match the area's narrative purpose. **Order them by best thematic fit — most important/relevant first, descending.** The solver places exactly one feature per BSP room, trying preferred features in the order you provide. Only preferred features are placed — no random filler. With N rooms, at most N features will appear, so put the most essential ones first.
    - **Settlement rule:** For any village, town, city, hamlet, or settlement area, the **first 1-2 preferredFeatures MUST be house/building/dwelling features** (search the group list for "house", "home", "building", "dwelling", "cottage", "hut", "lodge"). A village without houses is obviously wrong. Place thematic variety features (wells, granaries, markets) after houses.
@@ -344,4 +345,5 @@ The solver prioritizes preserving crossers over exact corner matching. At a Pit/
 - **Feature placement:** `paint_group` x,y is the bottom-left corner of the feature group. `adventure_apply_layout` handles this automatically from `suggestedFeatures`.
 - **Zone-based solver:** `adventure_apply_layout` resolves all terrain, crossers, and features atomically.
 - **Manual overrides:** Use `paint_tiles` with exact tileId for tiles the zone solver can't handle.
+- **Z-height sanity check.** After placing objects or transitions, verify the Z coordinate is near 0 (±0.5). Positions with Z far below 0 (e.g., -2.5) are on depressed terrain like tree borders or cliff edges — the object will appear sunken underground. If `adventure_find_walkable` returns a position with Z < -1.0, discard it and try a different region or use explicit tile-center coordinates (col*10+5, row*10+5) on known floor/clearing tiles.
 - **Do NOT auto-export HTML reports.**
