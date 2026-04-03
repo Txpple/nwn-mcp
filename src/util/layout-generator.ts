@@ -363,6 +363,48 @@ export function generateLayout(
     }
   }
 
+  // ── 7b. Convert short interior corridors to floor zones ────────────────────
+  // buildCrosserGrid strips crossers from tiles adjacent to rooms (non-default
+  // corners). For corridors ≤ 2 tiles, ALL tiles get stripped → no walkable path.
+  // Fix: convert those tiles to floor zones instead of crosser paths.
+  // Then strip those floor tiles from remaining crosser paths (floor + crosser
+  // edges = unsolvable on most interior tilesets). Iterate until stable.
+  if (!isExterior) {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      // Find and remove short corridors
+      for (let i = crossers.length - 1; i >= 0; i--) {
+        if (crossers[i].path.length <= 2) {
+          const removed = crossers.splice(i, 1)[0];
+          const tiles: Array<{ x: number; y: number }> = [];
+          for (const p of removed.path) {
+            const key = `${p.x},${p.y}`;
+            if (!floorTiles.has(key)) {
+              tiles.push({ x: p.x, y: p.y });
+              floorTiles.add(key);
+            }
+          }
+          if (tiles.length > 0) zones.push({ terrain: floorTerrain, tiles });
+          changed = true;
+        }
+      }
+      // Strip floor tiles from remaining crosser paths
+      for (const cx of crossers) {
+        const before = cx.path.length;
+        cx.path = cx.path.filter(p => !floorTiles.has(`${p.x},${p.y}`));
+        if (cx.path.length !== before) changed = true;
+      }
+      // Remove empty paths
+      for (let i = crossers.length - 1; i >= 0; i--) {
+        if (crossers[i].path.length === 0) {
+          crossers.splice(i, 1);
+          changed = true;
+        }
+      }
+    }
+  }
+
   // ── 8. Secondary crosser (stream/river) — interior only ──────────────────
   // Exterior styles use terrain corridors, so crossers would cut into wall
   // terrain and cause invalid tiles. Only interior styles get secondary crossers.
