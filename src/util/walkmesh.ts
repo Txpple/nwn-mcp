@@ -413,9 +413,10 @@ const CARDINAL_PROBES: [string, number, number][] = [
 /**
  * Check if a position is safe for object placement:
  * 1. The position itself must be walkable
- * 2. All cardinal probe points at 1m must also be walkable (buffer zone)
+ * 2. All cardinal probe points at `buffer` metres must also be walkable
  *
  * Use this for all placement/move tools except doors and sounds.
+ * Pass a larger buffer (e.g. 2.0) for transitions that should stay clear of walls.
  */
 export async function checkPlacementWalkable(
   worldX: number,
@@ -423,6 +424,7 @@ export async function checkPlacementWalkable(
   areaResref: string,
   index: ModuleIndex,
   resmanOpts: ResmanOptions,
+  buffer: number = PLACEMENT_BUFFER,
 ): Promise<{ ok: boolean; reason?: string; z?: number }> {
   // 1. Check the position itself
   const center = await checkPositionWalkable(worldX, worldY, areaResref, index, resmanOpts);
@@ -432,11 +434,17 @@ export async function checkPlacementWalkable(
   }
 
   // 2. Check cardinal probes for buffer zone
-  for (const [dir, dx, dy] of CARDINAL_PROBES) {
+  const probes: [string, number, number][] = [
+    ["north", 0, buffer],
+    ["south", 0, -buffer],
+    ["east", buffer, 0],
+    ["west", -buffer, 0],
+  ];
+  for (const [dir, dx, dy] of probes) {
     const probe = await checkPositionWalkable(worldX + dx, worldY + dy, areaResref, index, resmanOpts);
     if (!probe.walkable) {
       const surface = probe.material || "unknown";
-      return { ok: false, reason: `Position is within ${PLACEMENT_BUFFER}m of non-walkable surface (${surface}) to the ${dir}` };
+      return { ok: false, reason: `Position is within ${buffer}m of non-walkable surface (${surface}) to the ${dir}` };
     }
   }
 

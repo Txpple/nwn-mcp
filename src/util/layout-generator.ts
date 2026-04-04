@@ -14,6 +14,7 @@
  */
 
 import type { TilesetInfo } from "./tileset.js";
+import { getTileDoorWorldPositions } from "./tileset.js";
 import type { TerrainZone, CrosserPath } from "./zone-solver.js";
 import { computeValidPairs } from "./zone-solver.js";
 
@@ -34,6 +35,8 @@ export interface TransitionPoint {
   direction: "north" | "south" | "east" | "west";
   tileCol: number;
   tileRow: number;
+  nearFeature?: string;  // name of the nearest feature in the same room (if any)
+  atDoor?: boolean;      // true when snapped to a building feature's door position
 }
 
 export interface SuggestedFeature {
@@ -288,6 +291,29 @@ export function generateLayout(
   const crossers: CrosserPath[] = [];
   const corridorStyleStr = style.corridorStyle ?? "straight";
 
+  // ── 7a. Internal corridors for L-shape merged groups ────────────────────
+  for (const group of roomGroups) {
+    if (group.length <= 1) continue;
+    for (let gi = 0; gi < group.length - 1; gi++) {
+      if (isExterior) {
+        const path = computeCorridorPath(group[gi], group[gi + 1], corridorStyleStr, floorTiles, config.sCurveChance);
+        if (path.length > 0) {
+          const tiles: Array<{ x: number; y: number }> = [];
+          for (const p of path) {
+            if (!floorTiles.has(`${p.x},${p.y}`)) {
+              tiles.push(p);
+              floorTiles.add(`${p.x},${p.y}`);
+            }
+          }
+          if (tiles.length > 0) zones.push({ terrain: floorTerrain, tiles });
+        }
+      } else {
+        const corridor = connectRooms(group[gi], group[gi + 1], crosserType, corridorStyleStr, floorTiles, config.sCurveChance);
+        if (corridor) crossers.push(corridor);
+      }
+    }
+  }
+
   if (isExterior) {
     // Terrain corridors: carve floor terrain paths between rooms
     const connectTerrainCorridor = (a: Room, b: Room) => {
@@ -383,7 +409,7 @@ export function generateLayout(
   }
 
   // ── 9. Transitions & description ─────────────────────────────────────────
-  const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections, suggestedFeatures);
+  const transitionPoints = computeTransitions(rooms, width, height, transitionCount, transitionDirections, suggestedFeatures, floorTiles, tileset);
 
   const roomDescs = rooms.map((r, i) => `Room ${String.fromCharCode(65 + i)} (${r.w}x${r.h} at col=${r.x},row=${r.y})`);
   const corridorDescs = crossers.length > 0 ? ` ${crossers.length} corridors.` : "";
@@ -461,12 +487,12 @@ function areAdjacentRooms(a: Room, b: Room): boolean {
   const yOverlap = Math.min(aTop, bTop) - Math.max(a.y, b.y);
   if (yOverlap > 0) {
     const gap = Math.max(b.x - aRight, a.x - bRight);
-    return gap >= 2 && gap <= 8;
+    return gap >= 2 && gap <= 4;
   }
   const xOverlap = Math.min(aRight, bRight) - Math.max(a.x, b.x);
   if (xOverlap > 0) {
     const gap = Math.max(b.y - aTop, a.y - bTop);
-    return gap >= 2 && gap <= 8;
+    return gap >= 2 && gap <= 4;
   }
   return false;
 }
@@ -836,6 +862,66 @@ function packFeatures(
   return suggestions;
 }
 
+// ─── Feature door resolution ─────────────────────────────────────────────────
+
+/**
+ * Find the world-space door position for a building feature (house, inn, barn, etc.).
+ * Collects ALL doors across ALL tiles of the feature, then returns the first one
+ * whose 3m outward offset lands OUTSIDE the feature footprint (an exterior door).
+ * Interior doors (connecting feature tiles to each other) are skipped.
+ * Returns null if the feature has no exterior doors.
+ */
+function findFeatureDoorPosition(
+  feature: SuggestedFeature,
+  tileset: TilesetInfo,
+): { x: number; y: number; bearing: number; tileCol: number; tileRow: number } | null {
+  const group = tileset.groups.find(g => g.name === feature.feature);
+  if (!group) return null;
+
+  // Build set of feature tile positions for interior-door detection
+  const featureTileSet = new Set<string>();
+  for (let gc = 0; gc < group.columns; gc++) {
+    for (let gr = 0; gr < group.rows; gr++) {
+      featureTileSet.add(`${feature.x + gc},${feature.y + gr}`);
+    }
+  }
+
+  const OFFSET = 3.0;
+  // Collect all doors, prefer exterior ones
+  const allDoors: Array<{ x: number; y: number; bearing: number; tileCol: number; tileRow: number; exterior: boolean }> = [];
+  for (let gr = 0; gr < group.rows; gr++) {
+    for (let gc = 0; gc < group.columns; gc++) {
+      const tileId = group.tileIds[gr * group.columns + gc];
+      if (tileId < 0) continue;
+      const tile = tileset.tiles[tileId];
+      if (!tile || tile.doors === 0) continue;
+      const doorPositions = getTileDoorWorldPositions(tile, feature.x + gc, feature.y + gr, 0);
+      for (const door of doorPositions) {
+        const rad = (door.bearing * Math.PI) / 180;
+        const offsetX = door.x + Math.cos(rad) * OFFSET;
+        const offsetY = door.y + Math.sin(rad) * OFFSET;
+        // Check if offset lands on a feature tile
+        const offsetTileCol = Math.floor(offsetX / 10);
+        const offsetTileRow = Math.floor(offsetY / 10);
+        const isExterior = !featureTileSet.has(`${offsetTileCol},${offsetTileRow}`);
+        allDoors.push({
+          x: Math.round(door.x * 10) / 10,
+          y: Math.round(door.y * 10) / 10,
+          bearing: door.bearing,
+          tileCol: feature.x + gc,
+          tileRow: feature.y + gr,
+          exterior: isExterior,
+        });
+      }
+    }
+  }
+
+  // Return the first exterior door only — interior doors (facing other feature tiles)
+  // would place the transition inside the building. If no exterior door exists,
+  // return null so the caller falls back to edge-proximity tile placement.
+  return allDoors.find(d => d.exterior) ?? null;
+}
+
 // ─── Transition point computation ────────────────────────────────────────────
 
 function computeTransitions(
@@ -845,6 +931,8 @@ function computeTransitions(
   transitionCount?: number,
   transitionDirections?: string[],
   features?: SuggestedFeature[],
+  floorTiles?: Set<string>,
+  tileset?: TilesetInfo,
 ): TransitionPoint[] {
   const count = transitionCount ?? 1;
   const directions = transitionDirections?.map(d => d.toLowerCase()) ??
@@ -852,6 +940,8 @@ function computeTransitions(
 
   // Build set of tiles occupied by features — transitions must avoid these
   const featureTiles = new Set<string>();
+  // Build reverse index: room index → feature names in that room
+  const roomFeatures = new Map<number, string[]>();
   if (features) {
     for (const f of features) {
       for (let dx = 0; dx < f.columns; dx++) {
@@ -859,8 +949,26 @@ function computeTransitions(
           featureTiles.add(`${f.x + dx},${f.y + dy}`);
         }
       }
+      const list = roomFeatures.get(f.clearingIndex) ?? [];
+      list.push(f.feature);
+      roomFeatures.set(f.clearingIndex, list);
     }
   }
+
+  // Quadrant tracking: divide area at midpoints, track which quadrants have transitions
+  const midCol = width / 2;
+  const midRow = height / 2;
+  const usedQuadrants = new Set<string>();
+
+  function getQuadrant(col: number, row: number): string {
+    return (col < midCol ? "W" : "E") + (row < midRow ? "S" : "N");
+  }
+
+  // Natural quadrant affinity per direction (prefer these quadrants first)
+  const dirQuadrants: Record<string, string[]> = {
+    south: ["WS", "ES"], north: ["WN", "EN"],
+    west:  ["WS", "WN"], east:  ["ES", "EN"],
+  };
 
   const points: TransitionPoint[] = [];
   const usedRoomIndices = new Set<number>();
@@ -868,12 +976,15 @@ function computeTransitions(
   for (const dir of directions) {
     if (points.length >= count) break;
 
-    // Score each room: distance-to-edge for this direction
-    const scored: Array<{ room: Room; idx: number; edgeDist: number }> = [];
+    // Score each room: distance-to-edge for this direction + quadrant + feature bonus
+    const preferredQuads = dirQuadrants[dir] ?? [];
+    const scored: Array<{ room: Room; idx: number; score: number }> = [];
     for (let i = 0; i < rooms.length; i++) {
       const room = rooms[i];
       const cx = room.x + room.w / 2;
       const cy = room.y + room.h / 2;
+
+      // Base: inverse edge distance (closer to target edge = higher score)
       let edgeDist: number;
       switch (dir) {
         case "north": edgeDist = height - cy; break;
@@ -882,54 +993,81 @@ function computeTransitions(
         case "west":  edgeDist = cx; break;
         default:      edgeDist = Infinity;
       }
-      scored.push({ room, idx: i, edgeDist });
-    }
-    scored.sort((a, b) => a.edgeDist - b.edgeDist);
+      // Normalize to 0..1 range (closer = higher)
+      const maxDist = dir === "north" || dir === "south" ? height : width;
+      const edgeScore = 1 - Math.min(edgeDist / maxDist, 1);
 
-    // When multiple transitions, maximize distance: prefer rooms not yet used.
-    // Among unused rooms, pick the one closest to the target edge.
-    // Fall back to used rooms only if all are taken.
-    let pick = scored.find(s => !usedRoomIndices.has(s.idx)) ?? scored[0];
-    // If we have prior transition points, among unused rooms pick the one
-    // that maximizes minimum Manhattan distance to all prior transition tiles
+      // Quadrant bonus: prefer rooms in unused quadrants aligned with this direction
+      const roomQuad = getQuadrant(cx, cy);
+      let quadBonus = 0;
+      if (preferredQuads.includes(roomQuad) && !usedQuadrants.has(roomQuad)) {
+        quadBonus = 0.3;
+      } else if (!usedQuadrants.has(roomQuad)) {
+        quadBonus = 0.15;
+      }
+
+      // Feature bonus: prefer rooms with features (soft tiebreaker)
+      const hasFeature = roomFeatures.has(i);
+      const featureBonus = hasFeature ? 0.1 : 0;
+
+      // Room reuse penalty
+      const reusePenalty = usedRoomIndices.has(i) ? -0.5 : 0;
+
+      scored.push({ room, idx: i, score: edgeScore + quadBonus + featureBonus + reusePenalty });
+    }
+    scored.sort((a, b) => b.score - a.score);
+
+    // Among top candidates, maximize Manhattan distance to prior transitions
+    let pick = scored[0];
     if (points.length > 0) {
-      const unused = scored.filter(s => !usedRoomIndices.has(s.idx));
-      const candidates = unused.length > 0 ? unused : scored;
-      // Only consider rooms reasonably close to the target edge (top 50%)
-      const eligible = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * 0.5)));
+      const eligible = scored.slice(0, Math.max(1, Math.ceil(scored.length * 0.5)));
       let bestMinDist = -1;
       for (const s of eligible) {
         const cx = s.room.x + Math.floor(s.room.w / 2);
         const cy = s.room.y + Math.floor(s.room.h / 2);
         const minDist = Math.min(...points.map(p => Math.abs(p.tileCol - cx) + Math.abs(p.tileRow - cy)));
-        if (minDist > bestMinDist) { bestMinDist = minDist; pick = s; }
+        // Combine: 70% spacing score + 30% original score (so edge proximity still matters)
+        const maxManhattan = width + height;
+        const spacingScore = minDist / maxManhattan;
+        const combined = spacingScore * 0.7 + s.score * 0.3;
+        if (combined > bestMinDist) { bestMinDist = combined; pick = s; }
       }
     }
 
     const bestRoom = pick.room;
-    usedRoomIndices.add(pick.idx);
+    const bestRoomIdx = pick.idx;
+    usedRoomIndices.add(bestRoomIdx);
+    usedQuadrants.add(getQuadrant(bestRoom.x + bestRoom.w / 2, bestRoom.y + bestRoom.h / 2));
 
-    // Pick transition tile on the room's edge closest to the map boundary
+    // Pick transition tile: prefer edge tile closest to non-floor (wall/border) terrain.
+    // This places transitions at the "mouth" where the room meets wilderness.
     let tileCol: number, tileRow: number;
-    switch (dir) {
-      case "north":
-        tileCol = bestRoom.x + Math.floor(bestRoom.w / 2);
-        tileRow = bestRoom.y + bestRoom.h - 1;
-        break;
-      case "south":
-        tileCol = bestRoom.x + Math.floor(bestRoom.w / 2);
-        tileRow = bestRoom.y;
-        break;
-      case "east":
-        tileCol = bestRoom.x + bestRoom.w - 1;
-        tileRow = bestRoom.y + Math.floor(bestRoom.h / 2);
-        break;
-      case "west":
-        tileCol = bestRoom.x;
-        tileRow = bestRoom.y + Math.floor(bestRoom.h / 2);
-        break;
-      default:
-        continue;
+    const bestTile = findEdgeProximityTile(bestRoom, dir, floorTiles, featureTiles);
+    if (bestTile) {
+      tileCol = bestTile.col;
+      tileRow = bestTile.row;
+    } else {
+      // Fallback: room edge center (original logic)
+      switch (dir) {
+        case "north":
+          tileCol = bestRoom.x + Math.floor(bestRoom.w / 2);
+          tileRow = bestRoom.y + bestRoom.h - 1;
+          break;
+        case "south":
+          tileCol = bestRoom.x + Math.floor(bestRoom.w / 2);
+          tileRow = bestRoom.y;
+          break;
+        case "east":
+          tileCol = bestRoom.x + bestRoom.w - 1;
+          tileRow = bestRoom.y + Math.floor(bestRoom.h / 2);
+          break;
+        case "west":
+          tileCol = bestRoom.x;
+          tileRow = bestRoom.y + Math.floor(bestRoom.h / 2);
+          break;
+        default:
+          continue;
+      }
     }
 
     // If the chosen tile is occupied by a feature, scan along the room edge
@@ -942,7 +1080,6 @@ function computeTransitions(
         for (const sign of [1, -1]) {
           const tc = isVerticalEdge ? tileCol : tileCol + offset * sign;
           const tr = isVerticalEdge ? tileRow + offset * sign : tileRow;
-          // Stay within room bounds
           if (tc < bestRoom.x || tc >= bestRoom.x + bestRoom.w) continue;
           if (tr < bestRoom.y || tr >= bestRoom.y + bestRoom.h) continue;
           if (!featureTiles.has(`${tc},${tr}`)) {
@@ -956,16 +1093,111 @@ function computeTransitions(
       }
     }
 
-    points.push({
-      x: tileCol * 10 + 5,
-      y: tileRow * 10 + 5,
-      direction: dir as TransitionPoint["direction"],
-      tileCol,
-      tileRow,
-    });
+    // Find nearest feature in this room for context
+    const roomFeatureNames = roomFeatures.get(bestRoomIdx);
+    const nearFeature = roomFeatureNames?.[0];
+
+    // If the nearest feature has a door (building entrance), snap transition to the door
+    let doorPos: ReturnType<typeof findFeatureDoorPosition> = null;
+    if (nearFeature && tileset && features) {
+      const feat = features.find(f => f.feature === nearFeature && f.clearingIndex === bestRoomIdx);
+      if (feat) doorPos = findFeatureDoorPosition(feat, tileset);
+    }
+
+    if (doorPos) {
+      // Offset 3m outward along the door's facing direction so the portal
+      // sits in front of the building entrance, not inside it.
+      // NWN bearing: 0=east, 90=north, 180=west, 270=south.
+      const DOOR_OFFSET = 3.0;
+      const rad = (doorPos.bearing * Math.PI) / 180;
+      const ox = Math.round((doorPos.x + Math.cos(rad) * DOOR_OFFSET) * 10) / 10;
+      const oy = Math.round((doorPos.y + Math.sin(rad) * DOOR_OFFSET) * 10) / 10;
+      points.push({
+        x: ox,
+        y: oy,
+        direction: dir as TransitionPoint["direction"],
+        tileCol: doorPos.tileCol,
+        tileRow: doorPos.tileRow,
+        nearFeature,
+        atDoor: true,
+      });
+    } else {
+      points.push({
+        x: tileCol * 10 + 5,
+        y: tileRow * 10 + 5,
+        direction: dir as TransitionPoint["direction"],
+        tileCol,
+        tileRow,
+        ...(nearFeature ? { nearFeature } : {}),
+      });
+    }
   }
 
   return points;
+}
+
+/**
+ * Find the best floor tile on a room's edge facing `dir` that is closest to
+ * non-floor (wall/border) terrain. Places transitions at the "mouth" of the
+ * room where it meets wilderness/chasm/cliff.
+ *
+ * Returns null if floorTiles not available (falls back to center logic).
+ */
+function findEdgeProximityTile(
+  room: Room,
+  dir: string,
+  floorTiles?: Set<string>,
+  featureTiles?: Set<string>,
+): { col: number; row: number } | null {
+  if (!floorTiles) return null;
+
+  // Collect candidate tiles on the room's edge facing the target direction
+  const candidates: Array<{ col: number; row: number; wallDist: number }> = [];
+
+  // Scan edge tiles
+  const edgeTiles: Array<{ col: number; row: number }> = [];
+  switch (dir) {
+    case "north":
+      for (let x = room.x; x < room.x + room.w; x++) edgeTiles.push({ col: x, row: room.y + room.h - 1 });
+      break;
+    case "south":
+      for (let x = room.x; x < room.x + room.w; x++) edgeTiles.push({ col: x, row: room.y });
+      break;
+    case "east":
+      for (let y = room.y; y < room.y + room.h; y++) edgeTiles.push({ col: room.x + room.w - 1, row: y });
+      break;
+    case "west":
+      for (let y = room.y; y < room.y + room.h; y++) edgeTiles.push({ col: room.x, row: y });
+      break;
+  }
+
+  for (const t of edgeTiles) {
+    // Skip tiles occupied by features
+    if (featureTiles?.has(`${t.col},${t.row}`)) continue;
+
+    // Measure distance to nearest non-floor tile in the target direction
+    let dist = 0;
+    let probeCol = t.col, probeRow = t.row;
+    const dx = dir === "east" ? 1 : dir === "west" ? -1 : 0;
+    const dy = dir === "north" ? 1 : dir === "south" ? -1 : 0;
+    for (let step = 1; step <= 10; step++) {
+      probeCol += dx;
+      probeRow += dy;
+      if (!floorTiles.has(`${probeCol},${probeRow}`)) {
+        dist = step;
+        break;
+      }
+    }
+    // If we didn't find a wall within 10 tiles, use max distance
+    if (dist === 0) dist = 11;
+    candidates.push({ ...t, wallDist: dist });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Prefer tiles closest to wall terrain (smallest wallDist)
+  candidates.sort((a, b) => a.wallDist - b.wallDist);
+  return { col: candidates[0].col, row: candidates[0].row };
 }
 
 // ─── Tileset terrain helpers ─────────────────────────────────────────────────

@@ -7,7 +7,7 @@
  *   (b) AI-driven adventure creation — this file
  *
  * Tools:
- * - adventure_create_transition: One-way portal (blue light → waypoint) with VFX
+ * - adventure_create_transition: Bidirectional portal (blue lights + waypoints) with VFX
  * - adventure_find_walkable: Find guaranteed walkable coordinates in an area region
  * - adventure_generate_layout: Procedural layout generation (BSP rooms, corridors, features)
  * - adventure_apply_layout: Atomic application of a full layout (zones + crossers + features)
@@ -40,214 +40,257 @@ export function registerAdventureTools(server: McpServer): void {
 
   server.tool(
     "adventure_create_transition",
-    "Create a one-way area transition for adventure modules: places a useable blue shaft of light (plc_solblue) in the source area and a waypoint in the target area. The light's OnUsed script plays VFX_FNF_SUMMON_MONSTER_2, then jumps the PC to the destination waypoint after 2 seconds. For two-way transitions, call twice with swapped source/target.",
+    [
+      "Create a BIDIRECTIONAL area transition for adventure modules in a single call.",
+      "Places a useable blue shaft of light (plc_solblue) AND a landing waypoint at BOTH positions simultaneously,",
+      "guaranteeing the light and waypoint in each area are at the exact same coordinates.",
+      "The A→B light's OnUsed script plays VFX_FNF_SUMMON_MONSTER_2 and jumps the PC to the waypoint in B.",
+      "The B→A light does the same back to A. Both scripts are compiled and dialog resrefs are returned.",
+      "Tag constraints: max 11 chars (resrefs are 'a_at_<tag>' and 'a_rt_<tag>', both max 16 chars).",
+    ].join(" "),
     {
-      sourceArea: z.string().describe("Area resref where the blue light is placed"),
-      sourceX: numParam("Light X position in source area"),
-      sourceY: numParam("Light Y position in source area"),
-      sourceZ: optNumParam("Light Z position (default: walkmesh height)"),
-      targetArea: z.string().describe("Area resref where the waypoint is placed"),
-      targetX: numParam("Waypoint X position in target area"),
-      targetY: numParam("Waypoint Y position in target area"),
-      targetZ: optNumParam("Waypoint Z position (default: walkmesh height)"),
-      tag: z.string().describe("Base tag for naming. Max 11 chars. Light tag = 'at_<tag>', waypoint tag = 'wp_<tag>', script resref = 'a_at_<tag>' (16-char limit)."),
+      areaA: z.string().describe("First area resref (e.g. 'village')"),
+      aX: numParam("Portal X position in areaA"),
+      aY: numParam("Portal Y position in areaA"),
+      areaB: z.string().describe("Second area resref (e.g. 'cave')"),
+      bX: numParam("Portal X position in areaB"),
+      bY: numParam("Portal Y position in areaB"),
+      tag: z.string().describe("Base tag, max 11 chars. Generates: lights 'at_<tag>'/'rt_<tag>', waypoints 'wp_at_<tag>'/'wp_rt_<tag>', scripts 'a_at_<tag>'/'a_rt_<tag>', dialogs 'd_at_<tag>'/'d_rt_<tag>'."),
     },
-    async ({ sourceArea, sourceX, sourceY, sourceZ, targetArea, targetX, targetY, targetZ, tag }) => {
-      const sxN = toF(sourceX), syN = toF(sourceY), szN = toF(sourceZ);
-      const txN = toF(targetX), tyN = toF(targetY), tzN = toF(targetZ);
+    async ({ areaA, aX, aY, areaB, bX, bY, tag }) => {
+      const axN = toF(aX), ayN = toF(aY);
+      const bxN = toF(bX), byN = toF(bY);
       const index = requireIndex();
       const resmanOpts = await buildResmanOptions(index);
 
-      // Walkmesh validation for both positions
-      const srcWalk = await checkPlacementWalkable(sxN, syN, sourceArea.toLowerCase(), index, resmanOpts);
-      if (!srcWalk.ok) {
-        return { content: [{ type: "text", text: JSON.stringify({ error: "Source position not safe", area: sourceArea, position: { x: sxN, y: syN }, detail: srcWalk.reason }, null, 2) }] };
+      // Validate walkability at both positions — Z is authoritative from walkmesh
+      // Use 2m buffer so portals stay clear of walls and cliff edges
+      const TRANSITION_BUFFER = 2.0;
+      const aWalk = await checkPlacementWalkable(axN, ayN, areaA.toLowerCase(), index, resmanOpts, TRANSITION_BUFFER);
+      if (!aWalk.ok) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "areaA position not safe", area: areaA, position: { x: axN, y: ayN }, detail: aWalk.reason }, null, 2) }] };
       }
-      const tgtWalk = await checkPlacementWalkable(txN, tyN, targetArea.toLowerCase(), index, resmanOpts);
-      if (!tgtWalk.ok) {
-        return { content: [{ type: "text", text: JSON.stringify({ error: "Target position not safe", area: targetArea, position: { x: txN, y: tyN }, detail: tgtWalk.reason }, null, 2) }] };
+      const bWalk = await checkPlacementWalkable(bxN, byN, areaB.toLowerCase(), index, resmanOpts, TRANSITION_BUFFER);
+      if (!bWalk.ok) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "areaB position not safe", area: areaB, position: { x: bxN, y: byN }, detail: bWalk.reason }, null, 2) }] };
       }
 
-      const lightTag = `at_${tag}`.substring(0, 32);
-      const wpTag = `wp_${tag}`.substring(0, 32);
-      const scriptResref = `a_at_${tag}`.substring(0, 16);
-      const dlgResref = `d_at_${tag}`.substring(0, 16);
+      const aZ = aWalk.z ?? 0;
+      const bZ = bWalk.z ?? 0;
 
-      // 1. Write transition script with VFX + delayed jump
-      const scriptSource = [
+      // Tag prefixes
+      // A→B: light in A goes to waypoint in B
+      const lightATag  = `at_${tag}`.substring(0, 32);   // light in A
+      const wpBTag     = `wp_at_${tag}`.substring(0, 32); // waypoint in B (A→B destination)
+      const scriptAB   = `a_at_${tag}`.substring(0, 16);  // transition script A→B
+      const dlgAB      = `d_at_${tag}`.substring(0, 16);  // dialog for light in A
+      const onUsedAB   = `u_at_${tag}`.substring(0, 16);  // OnUsed script for light in A
+
+      // B→A: light in B goes to waypoint in A
+      const lightBTag  = `rt_${tag}`.substring(0, 32);   // light in B
+      const wpATag     = `wp_rt_${tag}`.substring(0, 32); // waypoint in A (B→A destination)
+      const scriptBA   = `a_rt_${tag}`.substring(0, 16);  // transition script B→A
+      const dlgBA      = `d_rt_${tag}`.substring(0, 16);  // dialog for light in B
+      const onUsedBA   = `u_rt_${tag}`.substring(0, 16);  // OnUsed script for light in B
+
+      // Helper: write + compile a script, register both .nss and .ncs in index.resources
+      async function writeScript(resref: string, source: string): Promise<{ success: boolean; output?: string }> {
+        const nssPath = path.join(index.tempDir, `${resref}.nss`);
+        await fsPromises.writeFile(nssPath, source, "utf-8");
+        const nssStat = await fsPromises.stat(nssPath);
+        index.resources.set(`${resref}.nss`, { resref, extension: "nss", filePath: nssPath, sizeBytes: nssStat.size });
+        const ncsPath = nssPath.replace(/\.nss$/i, ".ncs");
+        const result = await compileScript(nssPath, ncsPath, { resman: resmanOpts });
+        if (result.success) {
+          try {
+            const ncsStat = await fsPromises.stat(ncsPath);
+            index.resources.set(`${resref}.ncs`, { resref, extension: "ncs", filePath: ncsPath, sizeBytes: ncsStat.size });
+          } catch { /* ncs may not exist if compiler mocked */ }
+        }
+        return result;
+      }
+
+      // Helper: build a standard portal dialog
+      function makePortalDialog(jumpScriptResref: string): GffDocument {
+        return {
+          __data_type: "DLG ",
+          DelayEntry: { type: "dword", value: 0 },
+          DelayReply: { type: "dword", value: 0 },
+          EndConverAbort: { type: "resref", value: "" },
+          EndConversation: { type: "resref", value: "" },
+          NumWords: { type: "dword", value: 0 },
+          PreventZoomIn: { type: "byte", value: 1 },
+          StartingList: { type: "list", value: [
+            { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
+          ]},
+          EntryList: { type: "list", value: [
+            {
+              __struct_id: 0,
+              Animation: { type: "dword", value: 0 },
+              AnimLoop: { type: "byte", value: 1 },
+              Comment: { type: "cexostring", value: "" },
+              Delay: { type: "dword", value: 4294967295 },
+              Quest: { type: "cexostring", value: "" },
+              Script: { type: "resref", value: "" },
+              Sound: { type: "resref", value: "" },
+              Speaker: { type: "cexostring", value: "" },
+              Text: { type: "cexolocstring", value: { "0": "A shimmering portal beckons you forward. Do you wish to step through?" } },
+              RepliesList: { type: "list", value: [
+                { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
+                { __struct_id: 0, Index: { type: "dword", value: 1 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
+              ]},
+            },
+          ]},
+          ReplyList: { type: "list", value: [
+            {
+              __struct_id: 0,
+              Animation: { type: "dword", value: 0 },
+              AnimLoop: { type: "byte", value: 1 },
+              Comment: { type: "cexostring", value: "" },
+              Delay: { type: "dword", value: 4294967295 },
+              Quest: { type: "cexostring", value: "" },
+              Script: { type: "resref", value: jumpScriptResref },
+              Sound: { type: "resref", value: "" },
+              Text: { type: "cexolocstring", value: { "0": "[Step through the portal]" } },
+              EntriesList: { type: "list", value: [] },
+            },
+            {
+              __struct_id: 0,
+              Animation: { type: "dword", value: 0 },
+              AnimLoop: { type: "byte", value: 1 },
+              Comment: { type: "cexostring", value: "" },
+              Delay: { type: "dword", value: 4294967295 },
+              Quest: { type: "cexostring", value: "" },
+              Script: { type: "resref", value: "" },
+              Sound: { type: "resref", value: "" },
+              Text: { type: "cexolocstring", value: { "0": "[Turn away]" } },
+              EntriesList: { type: "list", value: [] },
+            },
+          ]},
+        };
+      }
+
+      // Helper: register a dialog file
+      async function writeDialog(resref: string, dlgDoc: GffDocument): Promise<void> {
+        const dlgPath = path.join(index.tempDir, `${resref}.dlg`);
+        await jsonToGff(dlgDoc, dlgPath);
+        const dlgStat = await fsPromises.stat(dlgPath);
+        index.resources.set(`${resref}.dlg`, { resref, extension: "dlg", filePath: dlgPath, sizeBytes: dlgStat.size });
+        index.parsedGff.set(`${resref}.dlg`, dlgDoc);
+      }
+
+      // Helper: build a waypoint GffObj
+      function makeWaypoint(wpTag: string, label: string, x: number, y: number, z: number): GffObj {
+        return {
+          __struct_id: GIT_STRUCT_ID.WAYPOINT,
+          Appearance: { type: "byte", value: 1 },
+          Description: { type: "cexolocstring", value: {} },
+          HasMapNote: { type: "byte", value: 0 },
+          LinkedTo: { type: "cexostring", value: "" },
+          LocalizedName: { type: "cexolocstring", value: { "0": label } },
+          MapNote: { type: "cexolocstring", value: {} },
+          MapNoteEnabled: { type: "byte", value: 0 },
+          Tag: { type: "cexostring", value: wpTag },
+          TemplateResRef: { type: "resref", value: "" },
+          XPosition: { type: "float", value: x },
+          YPosition: { type: "float", value: y },
+          ZPosition: { type: "float", value: z },
+          XOrientation: { type: "float", value: 0 },
+          YOrientation: { type: "float", value: 1 },
+        };
+      }
+
+      // Helper: build a blue portal light GffObj
+      async function makeLightObj(lightTag: string, dlgResref: string, onUsedResref: string, destWpTag: string, x: number, y: number, z: number): Promise<GffObj> {
+        const plcBlueprint = await resolveBlueprint(index, "plc_solblue", "utp", resmanOpts);
+        let obj: GffObj;
+        if (plcBlueprint) {
+          obj = plcBlueprint as GffObj;
+          delete obj.__data_type;
+        } else {
+          obj = {};
+        }
+        obj.__struct_id = GIT_STRUCT_ID.PLACEABLE;
+        setField(obj, "Tag", "cexostring", lightTag);
+        setField(obj, "TemplateResRef", "resref", "");
+        obj.LocName = { type: "cexolocstring", value: { "0": "Area Transition" } };
+        obj.LocalizedName = { type: "cexolocstring", value: { "0": "Area Transition" } };
+        obj.X = { type: "float", value: x };
+        obj.Y = { type: "float", value: y };
+        obj.Z = { type: "float", value: z };
+        obj.Bearing = { type: "float", value: 0 };
+        setField(obj, "Static", "byte", 0);
+        setField(obj, "Useable", "byte", 1);
+        setField(obj, "Conversation", "resref", dlgResref);
+        setField(obj, "HasInventory", "byte", 0);
+        setField(obj, "Plot", "byte", 1);
+        setField(obj, "OnUsed", "resref", onUsedResref);
+        setField(obj, "LinkedTo", "cexostring", destWpTag);
+        return obj;
+      }
+
+      // 1. Compile A→B and B→A transition scripts
+      const compAB = await writeScript(scriptAB, [
         "void main() {",
         "    object oPC = GetPCSpeaker();",
         "    if (!GetIsPC(oPC)) return;",
-        `    object oWP = GetWaypointByTag("${wpTag}");`,
+        `    object oWP = GetWaypointByTag("${wpBTag}");`,
         "    ApplyEffectToObject(DURATION_TYPE_INSTANT, EffectVisualEffect(VFX_FNF_SUMMON_MONSTER_2), oPC);",
         "    DelayCommand(2.0, AssignCommand(oPC, JumpToObject(oWP)));",
         "}",
-      ].join("\n");
+      ].join("\n"));
 
-      const nssPath = path.join(index.tempDir, `${scriptResref}.nss`);
-      await fsPromises.writeFile(nssPath, scriptSource, "utf-8");
-      const nssStat = await fsPromises.stat(nssPath);
-      index.resources.set(`${scriptResref}.nss`, { resref: scriptResref, extension: "nss", filePath: nssPath, sizeBytes: nssStat.size });
-
-      const ncsPath = nssPath.replace(/\.nss$/i, ".ncs");
-      const compResult = await compileScript(nssPath, ncsPath, { resman: resmanOpts });
-      if (compResult.success) {
-        try {
-          const ncsStat = await fsPromises.stat(ncsPath);
-          index.resources.set(`${scriptResref}.ncs`, { resref: scriptResref, extension: "ncs", filePath: ncsPath, sizeBytes: ncsStat.size });
-        } catch { /* ncs may not exist if compiler mocked */ }
-      }
-
-      // 2. Create dialog: NPC asks "Enter the portal?", PC chooses yes (fires script) or no
-      const dlgDoc: GffDocument = {
-        __data_type: "DLG ",
-        DelayEntry: { type: "dword", value: 0 },
-        DelayReply: { type: "dword", value: 0 },
-        EndConverAbort: { type: "resref", value: "" },
-        EndConversation: { type: "resref", value: "" },
-        NumWords: { type: "dword", value: 0 },
-        PreventZoomIn: { type: "byte", value: 1 },
-        StartingList: { type: "list", value: [
-          { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-        ]},
-        EntryList: { type: "list", value: [
-          // Entry 0: NPC prompt
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: "" },
-            Sound: { type: "resref", value: "" },
-            Speaker: { type: "cexostring", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "A shimmering portal beckons you forward. Do you wish to step through?" } },
-            RepliesList: { type: "list", value: [
-              { __struct_id: 0, Index: { type: "dword", value: 0 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-              { __struct_id: 0, Index: { type: "dword", value: 1 }, Active: { type: "resref", value: "" }, IsChild: { type: "byte", value: 0 } },
-            ]},
-          },
-        ]},
-        ReplyList: { type: "list", value: [
-          // Reply 0: Yes — fires transition script
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: scriptResref },
-            Sound: { type: "resref", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "[Step through the portal]" } },
-            EntriesList: { type: "list", value: [] },
-          },
-          // Reply 1: No — ends conversation
-          {
-            __struct_id: 0,
-            Animation: { type: "dword", value: 0 },
-            AnimLoop: { type: "byte", value: 1 },
-            Comment: { type: "cexostring", value: "" },
-            Delay: { type: "dword", value: 4294967295 },
-            Quest: { type: "cexostring", value: "" },
-            Script: { type: "resref", value: "" },
-            Sound: { type: "resref", value: "" },
-            Text: { type: "cexolocstring", value: { "0": "[Turn away]" } },
-            EntriesList: { type: "list", value: [] },
-          },
-        ]},
-      };
-
-      const dlgPath = path.join(index.tempDir, `${dlgResref}.dlg`);
-      await jsonToGff(dlgDoc, dlgPath);
-      const dlgStat = await fsPromises.stat(dlgPath);
-      index.resources.set(`${dlgResref}.dlg`, { resref: dlgResref, extension: "dlg", filePath: dlgPath, sizeBytes: dlgStat.size });
-      index.parsedGff.set(`${dlgResref}.dlg`, dlgDoc);
-
-      // 3. Place waypoint in target area
-      const waypoint: GffObj = {
-        __struct_id: GIT_STRUCT_ID.WAYPOINT,
-        Appearance: { type: "byte", value: 1 },
-        Description: { type: "cexolocstring", value: {} },
-        HasMapNote: { type: "byte", value: 0 },
-        LinkedTo: { type: "cexostring", value: "" },
-        LocalizedName: { type: "cexolocstring", value: { "0": `Transition: ${tag}` } },
-        MapNote: { type: "cexolocstring", value: {} },
-        MapNoteEnabled: { type: "byte", value: 0 },
-        Tag: { type: "cexostring", value: wpTag },
-        TemplateResRef: { type: "resref", value: "" },
-        XPosition: { type: "float", value: txN },
-        YPosition: { type: "float", value: tyN },
-        ZPosition: { type: "float", value: tgtWalk.z ?? tzN },
-        XOrientation: { type: "float", value: 0 },
-        YOrientation: { type: "float", value: 1 },
-      };
-
-      const { doc: targetGitDoc, obj: targetGit } = getGitDoc(index, targetArea);
-      snapshotGitForUndo(targetGitDoc, targetArea, "adventure_create_transition", `Place waypoint ${wpTag}`);
-      const wpList = getFieldList(targetGit, "WaypointList");
-      wpList.push(waypoint);
-      await writeBackGit(index, targetArea, targetGitDoc);
-      updateAreaCounts(index, targetArea);
-
-      // 4. Place useable blue shaft of light in source area
-      const plcBlueprint = await resolveBlueprint(index, "plc_solblue", "utp", resmanOpts);
-      let lightObj: GffObj;
-      if (plcBlueprint) {
-        lightObj = plcBlueprint as GffObj;
-        delete lightObj.__data_type;
-      } else {
-        lightObj = {};
-      }
-      lightObj.__struct_id = GIT_STRUCT_ID.PLACEABLE;
-      setField(lightObj, "Tag", "cexostring", lightTag);
-      setField(lightObj, "TemplateResRef", "resref", "");
-      // Placeables use LocName (not LocalizedName) for display name
-      lightObj.LocName = { type: "cexolocstring", value: { "0": "Area Transition" } };
-      lightObj.LocalizedName = { type: "cexolocstring", value: { "0": "Area Transition" } };
-      lightObj.X = { type: "float", value: sxN };
-      lightObj.Y = { type: "float", value: syN };
-      lightObj.Z = { type: "float", value: srcWalk.z ?? szN };
-      lightObj.Bearing = { type: "float", value: 0 };
-
-      // Make it interactive — plot, useable, not static
-      setField(lightObj, "Static", "byte", 0);
-      setField(lightObj, "Useable", "byte", 1);
-      setField(lightObj, "Conversation", "resref", dlgResref);
-      setField(lightObj, "HasInventory", "byte", 0);
-      setField(lightObj, "Plot", "byte", 1);
-
-      // OnUsed script that begins the conversation
-      const onUsedResref = `u_at_${tag}`.substring(0, 16);
-      const onUsedSource = [
+      const compBA = await writeScript(scriptBA, [
         "void main() {",
-        `    BeginConversation("${dlgResref}", GetLastUsedBy());`,
+        "    object oPC = GetPCSpeaker();",
+        "    if (!GetIsPC(oPC)) return;",
+        `    object oWP = GetWaypointByTag("${wpATag}");`,
+        "    ApplyEffectToObject(DURATION_TYPE_INSTANT, EffectVisualEffect(VFX_FNF_SUMMON_MONSTER_2), oPC);",
+        "    DelayCommand(2.0, AssignCommand(oPC, JumpToObject(oWP)));",
         "}",
-      ].join("\n");
-      const onUsedNssPath = path.join(index.tempDir, `${onUsedResref}.nss`);
-      await fsPromises.writeFile(onUsedNssPath, onUsedSource, "utf-8");
-      const onUsedStat = await fsPromises.stat(onUsedNssPath);
-      index.resources.set(`${onUsedResref}.nss`, { resref: onUsedResref, extension: "nss", filePath: onUsedNssPath, sizeBytes: onUsedStat.size });
-      const onUsedNcsPath = onUsedNssPath.replace(/\.nss$/i, ".ncs");
-      const onUsedComp = await compileScript(onUsedNssPath, onUsedNcsPath, { resman: resmanOpts });
-      if (onUsedComp.success) {
-        try {
-          const ncsStat = await fsPromises.stat(onUsedNcsPath);
-          index.resources.set(`${onUsedResref}.ncs`, { resref: onUsedResref, extension: "ncs", filePath: onUsedNcsPath, sizeBytes: ncsStat.size });
-        } catch { /* ncs may not exist if compiler mocked */ }
-      }
-      setField(lightObj, "OnUsed", "resref", onUsedResref);
+      ].join("\n"));
 
-      // Set LinkedTo metadata for connectivity checks
-      setField(lightObj, "LinkedTo", "cexostring", wpTag);
+      // 2. Compile OnUsed scripts
+      const compOnUsedAB = await writeScript(onUsedAB, [
+        "void main() {",
+        `    BeginConversation("${dlgAB}", GetLastUsedBy());`,
+        "}",
+      ].join("\n"));
 
-      const { doc: sourceGitDoc, obj: sourceGit } = getGitDoc(index, sourceArea);
-      snapshotGitForUndo(sourceGitDoc, sourceArea, "adventure_create_transition", `Place light ${lightTag}`);
-      const placeableList = getFieldList(sourceGit, "Placeable List");
-      placeableList.push(lightObj);
-      await writeBackGit(index, sourceArea, sourceGitDoc);
-      updateAreaCounts(index, sourceArea);
+      const compOnUsedBA = await writeScript(onUsedBA, [
+        "void main() {",
+        `    BeginConversation("${dlgBA}", GetLastUsedBy());`,
+        "}",
+      ].join("\n"));
+
+      // 3. Write dialogs
+      await writeDialog(dlgAB, makePortalDialog(scriptAB));
+      await writeDialog(dlgBA, makePortalDialog(scriptBA));
+
+      // 4. Build GIT objects
+      // areaA gets: light (at_<tag>) at aPos, landing waypoint (wp_rt_<tag>) at aPos
+      const lightA = await makeLightObj(lightATag, dlgAB, onUsedAB, wpBTag, axN, ayN, aZ);
+      const wpA    = makeWaypoint(wpATag, `Transition: ${tag} return`, axN, ayN, aZ);
+
+      // areaB gets: light (rt_<tag>) at bPos, landing waypoint (wp_at_<tag>) at bPos
+      const lightB = await makeLightObj(lightBTag, dlgBA, onUsedBA, wpATag, bxN, byN, bZ);
+      const wpB    = makeWaypoint(wpBTag, `Transition: ${tag}`, bxN, byN, bZ);
+
+      // 5. Write areaA GIT (light + landing waypoint — both at same aPos)
+      const { doc: gitDocA, obj: gitA } = getGitDoc(index, areaA);
+      snapshotGitForUndo(gitDocA, areaA, "adventure_create_transition", `Place light ${lightATag} + waypoint ${wpATag}`);
+      getFieldList(gitA, "Placeable List").push(lightA);
+      getFieldList(gitA, "WaypointList").push(wpA);
+      await writeBackGit(index, areaA, gitDocA);
+      updateAreaCounts(index, areaA);
+
+      // 6. Write areaB GIT (light + landing waypoint — both at same bPos)
+      const { doc: gitDocB, obj: gitB } = getGitDoc(index, areaB);
+      snapshotGitForUndo(gitDocB, areaB, "adventure_create_transition", `Place light ${lightBTag} + waypoint ${wpBTag}`);
+      getFieldList(gitB, "Placeable List").push(lightB);
+      getFieldList(gitB, "WaypointList").push(wpB);
+      await writeBackGit(index, areaB, gitDocB);
+      updateAreaCounts(index, areaB);
 
       return {
         content: [{
@@ -255,12 +298,26 @@ export function registerAdventureTools(server: McpServer): void {
           text: JSON.stringify({
             success: true,
             transition: {
-              source: { area: sourceArea, lightTag, position: { x: sxN, y: syN, z: srcWalk.z ?? szN } },
-              target: { area: targetArea, waypointTag: wpTag, position: { x: txN, y: tyN, z: tgtWalk.z ?? tzN } },
-              dialog: dlgResref,
-              script: scriptResref,
-              compiled: compResult.success,
-              ...(compResult.success ? {} : { compilerOutput: compResult.output }),
+              areaA: {
+                area: areaA,
+                lightTag: lightATag,
+                landingWaypointTag: wpATag,
+                position: { x: axN, y: ayN, z: aZ },
+                dialogResref: dlgAB,
+                scriptResref: scriptAB,
+                compiled: compAB.success,
+                ...(compAB.success ? {} : { compilerOutput: compAB.output }),
+              },
+              areaB: {
+                area: areaB,
+                lightTag: lightBTag,
+                landingWaypointTag: wpBTag,
+                position: { x: bxN, y: byN, z: bZ },
+                dialogResref: dlgBA,
+                scriptResref: scriptBA,
+                compiled: compBA.success,
+                ...(compBA.success ? {} : { compilerOutput: compBA.output }),
+              },
             },
           }, null, 2),
         }],
@@ -366,8 +423,9 @@ export function registerAdventureTools(server: McpServer): void {
       // higher ground — avoids returning depressed terrain like tree roots
       // when clearings at Z~0 are also available in the region)
       const allWalkable: Array<{ x: number; y: number; z: number }> = [];
+      const findBuffer = avoidEdges !== "false" ? 2.0 : 1.0;
       for (const { x, y } of candidates) {
-        const check = await checkPlacementWalkable(x, y, area.toLowerCase(), index, resmanOpts);
+        const check = await checkPlacementWalkable(x, y, area.toLowerCase(), index, resmanOpts, findBuffer);
         if (check.ok) {
           allWalkable.push({ x, y, z: check.z ?? 0 });
         }

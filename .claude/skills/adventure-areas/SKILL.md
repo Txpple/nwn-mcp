@@ -108,7 +108,7 @@ Pick the best match based on:
 ### Phase 3: Dimensions + Layout Plan
 
 Propose area dimensions based on the plot's description of the location's scale. Interior and exterior areas have different minimums due to exterior styles needing larger rooms for building features (2x2, 2x3 houses etc.):
-- **Interior** — minimum 14x14 for 4 rooms (splitThreshold 10)
+- **Interior** — minimum 12x12 for 4 rooms (splitThreshold 10)
 - **Exterior** — minimum 18x18 for 4 rooms (splitThreshold 12, needs larger leaves for 2x3 features)
 - Medium area: 18x18 to 22x22
 - Large exploration area: 22x22 to 26x26
@@ -123,7 +123,7 @@ Propose area dimensions based on the plot's description of the location's scale.
 3. Pick 3-6 group names from the returned list that match the area's narrative purpose. **Order them by best thematic fit — most important/relevant first, descending.** The solver places exactly one feature per BSP room, trying preferred features in the order you provide. Only preferred features are placed — no random filler. With N rooms, at most N features will appear, so put the most essential ones first.
    - **Settlement rule:** For any village, town, city, hamlet, or settlement area, the **first 1-2 preferredFeatures MUST be house/building/dwelling features** (search the group list for "house", "home", "building", "dwelling", "cottage", "hut", "lodge"). A village without houses is obviously wrong. Place thematic variety features (wells, granaries, markets) after houses.
    - **Banned features:** NEVER use features containing "Chessboard" or "Portal" in any area. These are game-mechanic props that break immersion in adventure areas. Skip them when scanning the feature list.
-4. Pass them as `preferredFeatures` in the style object. **Do NOT omit preferredFeatures** — without it the generator picks random groups and the area will feel incoherent (e.g., Dragon Skeletons in a peaceful farmstead, Evil Temples in a village square).
+4. Pass them as `preferredFeatures` in the style object. **Do NOT omit preferredFeatures** — without it the generator returns `suggestedFeatures:[]` and **zero feature groups will be painted in the area**. No houses, no structures, no landmarks. The area will be completely empty terrain. This is never correct for adventure areas.
 
 ```
 # Example: a farmstead area — features match the narrative
@@ -142,7 +142,11 @@ adventure_generate_layout(tileset="ttf02", width="16", height="16",
   transitionCount="2")
 ```
 
-The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass directly to `adventure_apply_layout`, plus `transitionPoints` with guaranteed in-bounds coordinates.
+The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass directly to `adventure_apply_layout`, plus `transitionPoints` with guaranteed in-bounds coordinates. Transition points are automatically:
+- **Spread across quadrants** — multiple transitions avoid clustering in the same part of the area
+- **Placed near border terrain** — at the room edge closest to wall/cliff/tree terrain, where a path would naturally emerge
+- **Feature-aware** — rooms containing features (buildings, landmarks) are preferred; the `nearFeature` field names the closest feature if one exists
+- **Door-snapped** — when a feature is a building with a door (house, inn, barn), the transition point snaps to the door's world position (`atDoor: true`); the portal appears right at the building entrance
 
 **Fallback:** If `adventure_generate_layout` doesn't produce a good fit (e.g., unusual tileset or custom requirements), design the layout manually. **Read the "CRITICAL — Area Layout Design" section below BEFORE designing any zones.** The #1 mistake is creating one big open space — areas MUST have multiple distinct zones/rooms connected by paths or corridors.
 
@@ -167,12 +171,10 @@ Execute in this order:
 
    **CRITICAL — Terrain adjacency chains:**
 
-   Tilesets only have transition tiles between specific terrain pairs. You CANNOT place two terrains next to each other if the tileset has no transition tiles between them — the solver will produce broken results. **Before designing zones, check adjacency compatibility.** Common chains:
-   - `tno01` (Castle Exterior Rural): `Trees → Grass → CastleWall → Dirt` — you MUST place a Grass buffer zone between Trees and CastleWall.
+   Tilesets only have transition tiles between specific terrain pairs. You CANNOT place two terrains next to each other if the tileset has no transition tiles between them — the solver will produce broken results. **Before designing zones, check adjacency compatibility.** Common chain:
    - `ttr01` (Rural): `Trees → Grass` (+ Water, Dirt variants)
    - For unfamiliar tilesets, call `get_tileset_details` and examine which terrain pairs share transition tiles.
 
-   If your layout requires Trees next to CastleWall (e.g., a walled compound in a forest), add a 1-tile Grass zone between them. This is not optional — it is a tileset constraint.
 
 If the solver warns about missing tile combinations:
 - Simplify terrain (avoid 3+ terrain types meeting at one point)
@@ -247,38 +249,36 @@ Check `adventure_apply_layout` results for `solverWarnings`. If there are crosse
 
 Use `adventure_create_transition` for ALL area transitions — do NOT use doors, `link_doors`, or `create_area_transition`. The adventure pipeline uses the light-based transition tool exclusively.
 
-`adventure_create_transition` creates a one-way area transition using a useable blue shaft of light ("Area Transition"). The player clicks the light, a dialog asks if they want to step through, and on confirmation a VFX plays and the PC teleports to the destination waypoint. For two-way connections, call `adventure_create_transition` **twice** with swapped source/target. No separate visual marker (`plc_solblue`) is needed — the portal IS the blue light.
+`adventure_create_transition` creates a **bidirectional** transition in a **single call**. It places a useable blue shaft of light AND a landing waypoint at **both** positions simultaneously, guaranteeing the light and waypoint in each area are always at exactly the same coordinates. **Do NOT call twice** — one call handles both directions.
 
-**CRITICAL: Tag length limit.** The transition script resref is `a_at_<tag>`, and NWN resrefs are max 16 characters. That means the `tag` parameter can be at most **11 characters** (`16 - 5` for the `a_at_` prefix). Use short abbreviated tags like `vil_inn`, `inn_vil`, `vil_cry`, `cry_vil` — NOT `village_to_inn` (which truncates and collides with `village_to_crypt`). Every transition pair must have a **unique** tag that fits in 11 chars.
+**CRITICAL: Tag length limit.** Resrefs are `a_at_<tag>` and `a_rt_<tag>` (max 16 chars each), so the `tag` parameter can be at most **11 characters**. Use short abbreviated tags like `vil_cave`, `vil_inn`, `inn_cry` — NOT `village_to_cave`. Every transition must have a **unique** tag that fits in 11 chars.
 
 ```
-# Village → Cave
+# Village ↔ Cave (bidirectional, single call)
 adventure_create_transition(
-  sourceArea: "village", sourceX: "85.0", sourceY: "45.0",
-  targetArea: "cave", targetX: "15.0", targetY: "15.0",
+  areaA: "village", aX: "85.0", aY: "45.0",
+  areaB: "cave", bX: "15.0", bY: "15.0",
   tag: "vil_cave"
 )
-
-# Cave → Village (return path)
-adventure_create_transition(
-  sourceArea: "cave", sourceX: "12.0", sourceY: "15.0",
-  targetArea: "village", targetX: "82.0", targetY: "45.0",
-  tag: "cave_vil"
-)
 ```
 
-The tool places a useable blue shaft of light ("Area Transition") with an OnUsed script that plays a teleport VFX and jumps the PC to the destination. No separate visual marker needed — the light IS the visual marker.
+The tool places in each area: a blue light portal + a landing waypoint at the **same coordinates** with Z taken from the walkmesh. No separate calls, no coordinate drift.
 
-**After placing transitions, update the transition dialog text** to tell the player where each portal leads. Use `edit_dialog_node` on the generated dialog (resref `d_at_<tag>`, entry node index 0) to set text like: *"This appears to be the way to The Ashfen Mine. Do you wish to step through?"* — using the destination area's display name from `list_areas`. For return portals, use phrasing like *"This appears to be the way back to Millhaven."*
+- In `areaA`: light `at_<tag>` + waypoint `wp_rt_<tag>` at `(aX, aY)`
+- In `areaB`: light `rt_<tag>` + waypoint `wp_at_<tag>` at `(bX, bY)`
 
-Place the target waypoint at the same position as the destination portal. Since portals require clicking (not walk-through), there's no risk of re-triggering.
+**After placing transitions, update both dialog texts** to tell the player where each portal leads. Use `edit_dialog_node` on:
+- `d_at_<tag>` (light in areaA, entry node 0): *"This appears to be the way to [location]. Do you wish to step through?"*
+- `d_rt_<tag>` (light in areaB, entry node 0): *"This appears to be the way back to [location]. Do you wish to step through?"*
+
+**Matching transition points to destinations using `nearFeature`:**
+Each transition point from `adventure_generate_layout` may include a `nearFeature` field (e.g., `"Inn 1x2"`, `"Lodge 2x2"`). When deciding which transition point to use for which area connection, **match `nearFeature` to the destination**. Example: if the plot says this area connects to an inn AND to a cave, use the transition point with `nearFeature: "Inn 1x2"` for the inn connection, and the other point for the cave. This places the portal next to the building it leads to — the player sees a house and a glowing portal beside it, which makes spatial sense. When `atDoor: true`, the portal is right at the building entrance.
 
 **Transition placement rules:**
-- **Use `adventure_generate_layout` transition points** when available — these are pre-computed walkable coordinates near the correct edge.
-- **Use `adventure_find_walkable`** to get guaranteed walkable coordinates if you need to place transitions manually: `adventure_find_walkable(area="myarea", region="south")` returns validated positions with Z height.
-- **On crosser paths (roads/streams):** Place the light on the **last crosser tile before the border** — the tile where the crosser ends. Center on that tile (tile_col * 10 + 5, tile_row * 10 + 5).
-- **Without crossers:** Place the light on the walkable tile closest to the cliff/wall edge. Typically at row 1 or row (height-2), col 1 or col (width-2).
-- **At buildings/structures:** Place the light directly in front of feature doors.
+- **Use `adventure_generate_layout` transition points** when available — these are pre-computed walkable coordinates near the correct edge, spread across different quadrants, and snapped to building doors when possible.
+- **Verify walkability with `adventure_find_walkable`** if a transition point from the generator fails the 2m walkability check. Pass a bounding box region around the room: `adventure_find_walkable(area="myarea", region="x1,y1,x2,y2")` where x1/y1/x2/y2 are the room bounds in world coords (tile * 10).
+- **At buildings/structures:** The generator automatically snaps to doors when possible (`atDoor: true`). If placing manually, put the light directly in front of feature doors.
+- **Near border terrain:** Transitions should be close to wall/cliff/tree terrain (where a path into the area would naturally emerge), but the 2m walkability buffer keeps them safely inside the walkable area.
 - **Never place on border/transition tiles** (tiles where cliff/wall meets walkable terrain). Stay at least 1 tile inside the walkable area.
 
 ---
