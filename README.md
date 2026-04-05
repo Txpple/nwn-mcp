@@ -206,7 +206,7 @@ Tools specific to the `/create-adventure` pipeline for autonomous module buildin
 - `adventure_apply_layout` — atomically apply a generated layout (zones + crossers + features) via the zone solver
 - `adventure_list_features` — enumerate solver-compatible feature groups for a tileset and style
 - `adventure_find_walkable` — find guaranteed walkable coordinates in an area region
-- `adventure_create_transition` — one-way portal transitions (blue light + VFX + dialog)
+- `adventure_create_transition` — bidirectional portal transitions (single call places lights + waypoints in both areas)
 
 ## Architecture
 
