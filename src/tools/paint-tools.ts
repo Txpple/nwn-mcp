@@ -5,26 +5,191 @@
  * - create_area: Create a new area with default terrain tiles
  * - delete_area: Remove an area and its files from the module
  * - paint_tiles: Set exact tile IDs (manual/direct placement)
+ * - paint_terrain: Paint terrain and re-solve shared-corner neighbors
  * - paint_group: Place multi-tile groups (temples, lodges, etc.)
  * - set_area_properties: Modify area lighting, music, weather, etc.
  */
 
-import { z } from "zod";
-import path from "path";
-import fs from "fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { requireIndex, buildResmanOptions } from "../module-loader.js";
+import fs from "fs/promises";
+import path from "path";
+import { z } from "zod";
+import { buildResmanOptions, requireIndex } from "../module-loader.js";
+import { syncNasherSourceForIndex } from "../nasher-sync.js";
 import { jsonToGff } from "../nim-tools.js";
-import { getTilesetInfo } from "../util/tileset.js";
-import { validateTilePlacement, findDefaultTile } from "../util/tile-solver.js";
-import type { TileGridEntry } from "../util/tile-solver.js";
-import { getFieldList, getFieldLocStr, getFieldNum, getFieldStr, setFieldNum } from "../types/gff.js";
 import type { GffDocument, GffObj } from "../types/gff.js";
-import { getWokForTile, computeTileWalkSummary, ensureWokCacheDir } from "../util/walkmesh.js";
+import { getFieldList, getFieldNum, getFieldStr, setFieldNum } from "../types/gff.js";
 import type { TwoDATable } from "../types/module.js";
+import {
+  GROUP_TRANSFORMS,
+  type GroupTransform,
+  getGroupTransformDimensions,
+  getTransformedGroupPlacements,
+  parseGroupTransformRequest,
+  pickRandomGroupTransform,
+  type TransformedGroupDimensions,
+  type TransformedGroupPlacement,
+} from "../util/group-transform.js";
+import {
+  buildDefaultTileGrid,
+  type DefaultTileFillMode,
+  type DefaultTileGridWarning,
+  type DefaultTileVariant,
+  type TileGridEntry,
+  validateTilePlacement,
+} from "../util/tile-solver.js";
+import type { TilesetInfo } from "../util/tileset.js";
+import { getTilesetInfo } from "../util/tileset.js";
+import { computeTileWalkSummary, ensureWokCacheDir, getWokForTile } from "../util/walkmesh.js";
+import { paintTerrainTiles, type TerrainPaintTile } from "../util/zone-solver.js";
+
+function parseDefaultFillMode(value: string | undefined): DefaultTileFillMode | null {
+  const mode = (value ?? "relaxed").toLowerCase();
+  return mode === "safe" || mode === "relaxed" ? mode : null;
+}
+
+function summarizeDefaultFillUsage(placements: DefaultTileVariant[]) {
+  const usage = new Map<
+    string,
+    { tileId: number; orientation: number; score: number; count: number; warnings: string[] }
+  >();
+  for (const placement of placements) {
+    const key = `${placement.tileId}:${placement.orientation}`;
+    const existing = usage.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      usage.set(key, {
+        tileId: placement.tileId,
+        orientation: placement.orientation,
+        score: placement.score,
+        count: 1,
+        warnings: placement.warnings,
+      });
+    }
+  }
+  return [...usage.values()].sort((a, b) => b.count - a.count || a.tileId - b.tileId || a.orientation - b.orientation);
+}
+
+function summarizeDefaultFillWarnings(warnings: DefaultTileGridWarning[]) {
+  const counts = new Map<string, number>();
+  for (const warning of warnings) {
+    counts.set(warning.message, (counts.get(warning.message) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([message, count]) => ({ message, count }))
+    .sort((a, b) => b.count - a.count || a.message.localeCompare(b.message));
+}
+
+function buildTileGrid(tileList: GffObj[], width: number, height: number): (TileGridEntry | null)[] {
+  const grid: (TileGridEntry | null)[] = [];
+  for (let i = 0; i < width * height; i++) {
+    const entry = tileList[i];
+    if (entry) {
+      grid.push({ tileId: getFieldNum(entry, "Tile_ID"), orientation: getFieldNum(entry, "Tile_Orientation") });
+    } else {
+      grid.push(null);
+    }
+  }
+  return grid;
+}
+
+function parseIntegerField(value: unknown, label: string): number {
+  const numberValue =
+    typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN;
+  if (!Number.isInteger(numberValue)) {
+    throw new Error(`${label} must be an integer`);
+  }
+  return numberValue;
+}
+
+function parseTerrainPaintTiles(tilesJson: string): TerrainPaintTile[] {
+  const parsed: unknown = JSON.parse(tilesJson);
+  if (!Array.isArray(parsed)) throw new Error("tiles must be an array");
+
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`tiles[${index}] must be an object`);
+    }
+    const raw = entry as Record<string, unknown>;
+    return {
+      x: parseIntegerField(raw.x, `tiles[${index}].x`),
+      y: parseIntegerField(raw.y, `tiles[${index}].y`),
+    };
+  });
+}
+
+function terrainLookupNames(terrain: TilesetInfo["terrainTypes"][number]): string[] {
+  return [terrain.rawName, terrain.name].filter((name): name is string => !!name);
+}
+
+function resolveTerrainName(tileset: TilesetInfo, requested: string): string | null {
+  const lcRequested = requested.toLowerCase();
+  const match = tileset.terrainTypes.find((terrain) =>
+    terrainLookupNames(terrain).some((name) => name.toLowerCase() === lcRequested),
+  );
+  return match ? (match.rawName || match.name).toLowerCase() : null;
+}
+
+function listTerrainNames(tileset: TilesetInfo): string {
+  const names = new Set<string>();
+  for (const terrain of tileset.terrainTypes) {
+    for (const name of terrainLookupNames(terrain)) names.add(name);
+  }
+  return [...names].join(", ");
+}
+
+function groupFits(
+  x: number,
+  y: number,
+  dimensions: TransformedGroupDimensions,
+  areaWidth: number,
+  areaHeight: number,
+): boolean {
+  return x >= 0 && y >= 0 && x + dimensions.columns <= areaWidth && y + dimensions.rows <= areaHeight;
+}
+
+function collectGroupPlacementWarnings(
+  placements: TransformedGroupPlacement[],
+  dimensions: TransformedGroupDimensions,
+  grid: (TileGridEntry | null)[],
+  areaWidth: number,
+  areaHeight: number,
+  tileset: TilesetInfo,
+): string[] {
+  const warnings: string[] = [];
+  for (const placement of placements) {
+    const isEdge =
+      placement.localCol === 0 ||
+      placement.localCol === dimensions.columns - 1 ||
+      placement.localRow === 0 ||
+      placement.localRow === dimensions.rows - 1;
+    if (!isEdge) continue;
+
+    const violations = validateTilePlacement(grid, placement.gx, placement.gy, areaWidth, areaHeight, tileset);
+    if (violations.length > 0) {
+      warnings.push(`(${placement.gx},${placement.gy}): ${violations.join("; ")}`);
+    }
+  }
+  return warnings;
+}
+
+function applyGroupPlacementsToGrid(
+  grid: (TileGridEntry | null)[],
+  placements: TransformedGroupPlacement[],
+  areaWidth: number,
+): (TileGridEntry | null)[] {
+  const nextGrid = grid.slice();
+  for (const placement of placements) {
+    nextGrid[placement.gy * areaWidth + placement.gx] = {
+      tileId: placement.tileId,
+      orientation: placement.orientation,
+    };
+  }
+  return nextGrid;
+}
 
 export function registerPaintTools(server: McpServer): void {
-
   // ─── create_area ───────────────────────────────────────────────────────
 
   server.tool(
@@ -37,12 +202,32 @@ export function registerPaintTools(server: McpServer): void {
       height: z.string().describe("Area height in tiles (1-32)"),
       tileset: z.string().describe("Tileset resref (e.g., 'ttf01' for forest)"),
       defaultTerrain: z.string().optional().describe("Default terrain type (defaults to tileset's first terrain)"),
+      defaultFillMode: z
+        .enum(["relaxed", "safe"])
+        .optional()
+        .describe(
+          "'relaxed' (default) varies visually among compatible flat tile IDs; 'safe' uses strict uniform-terrain, no-crosser tiles only",
+        ),
     },
-    async ({ resref, name, width: widthStr, height: heightStr, tileset: tilesetResref, defaultTerrain }) => {
+    async ({
+      resref,
+      name,
+      width: widthStr,
+      height: heightStr,
+      tileset: tilesetResref,
+      defaultTerrain,
+      defaultFillMode,
+    }) => {
       const width = parseInt(widthStr, 10);
       const height = parseInt(heightStr, 10);
-      if (isNaN(width) || width < 1 || width > 32) return { content: [{ type: "text", text: "width must be 1-32" }] };
-      if (isNaN(height) || height < 1 || height > 32) return { content: [{ type: "text", text: "height must be 1-32" }] };
+      if (Number.isNaN(width) || width < 1 || width > 32)
+        return { content: [{ type: "text", text: "width must be 1-32" }] };
+      if (Number.isNaN(height) || height < 1 || height > 32)
+        return { content: [{ type: "text", text: "height must be 1-32" }] };
+      const fillMode = parseDefaultFillMode(defaultFillMode);
+      if (!fillMode) {
+        return { content: [{ type: "text", text: "defaultFillMode must be 'relaxed' or 'safe'" }] };
+      }
       const index = requireIndex();
       const resrefLower = resref.toLowerCase();
       const areKey = `${resrefLower}.are`;
@@ -54,15 +239,22 @@ export function registerPaintTools(server: McpServer): void {
       const resmanOpts = await buildResmanOptions(index);
       const tileset = await getTilesetInfo(tilesetResref.toLowerCase(), resmanOpts, index);
 
-      // Find default tile
-      const defaultPlacement = findDefaultTile(tileset, defaultTerrain);
-      if (!defaultPlacement) {
-        return { content: [{ type: "text", text: `No suitable default tile found for terrain: ${defaultTerrain || tileset.defaultTerrain}` }] };
+      const defaultGrid = buildDefaultTileGrid(width, height, tileset, defaultTerrain, fillMode);
+      if (!defaultGrid) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No suitable default tile found for terrain: ${defaultTerrain || tileset.defaultTerrain}`,
+            },
+          ],
+        };
       }
 
       // Build Tile_List
       const tileList: GffObj[] = [];
       for (let i = 0; i < width * height; i++) {
+        const defaultPlacement = defaultGrid.placements[i];
         tileList.push({
           __struct_id: i,
           Tile_ID: { type: "int", value: defaultPlacement.tileId },
@@ -130,9 +322,9 @@ export function registerPaintTools(server: McpServer): void {
         "Placeable List": { type: "list", value: [] },
         SoundList: { type: "list", value: [] },
         StoreList: { type: "list", value: [] },
-        "TriggerList": { type: "list", value: [] },
+        TriggerList: { type: "list", value: [] },
         WaypointList: { type: "list", value: [] },
-        "List": { type: "list", value: [] },
+        List: { type: "list", value: [] },
         AreaProperties: {
           type: "struct",
           value: {
@@ -158,7 +350,7 @@ export function registerPaintTools(server: McpServer): void {
         "Placeable List": { type: "list", value: [] },
         SoundList: { type: "list", value: [] },
         StoreList: { type: "list", value: [] },
-        "TriggerList": { type: "list", value: [] },
+        TriggerList: { type: "list", value: [] },
         WaypointList: { type: "list", value: [] },
       };
 
@@ -220,24 +412,37 @@ export function registerPaintTools(server: McpServer): void {
         }
       }
 
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "create_area" });
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            area: resrefLower,
-            name,
-            width,
-            height,
-            tileset: tilesetResref.toLowerCase(),
-            defaultTile: {
-              tileId: defaultPlacement.tileId,
-              orientation: defaultPlacement.orientation,
-              terrain: defaultTerrain || tileset.defaultTerrain,
-            },
-            totalTiles: width * height,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                area: resrefLower,
+                name,
+                width,
+                height,
+                tileset: tilesetResref.toLowerCase(),
+                defaultTile: {
+                  terrain: defaultGrid.terrain,
+                  mode: defaultGrid.mode,
+                  candidateCount: defaultGrid.candidates.length,
+                  variantsUsed: summarizeDefaultFillUsage(defaultGrid.placements),
+                },
+                ...(defaultGrid.warnings.length > 0
+                  ? { defaultFillWarnings: summarizeDefaultFillWarnings(defaultGrid.warnings) }
+                  : {}),
+                totalTiles: width * height,
+                ...(nasherSync ? { nasherSync } : {}),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );
@@ -267,7 +472,11 @@ export function registerPaintTools(server: McpServer): void {
       const ifoObj = ifo as GffObj;
       const entryArea = getFieldStr(ifoObj, "Mod_Entry_Area").toLowerCase();
       if (areaResref === entryArea) {
-        return { content: [{ type: "text", text: `Cannot delete the module entry area '${areaResref}'. Change Mod_Entry_Area first.` }] };
+        return {
+          content: [
+            { type: "text", text: `Cannot delete the module entry area '${areaResref}'. Change Mod_Entry_Area first.` },
+          ],
+        };
       }
 
       const deletedArea = index.areas.get(areaResref)!;
@@ -275,7 +484,7 @@ export function registerPaintTools(server: McpServer): void {
 
       // Remove from IFO Mod_Area_list
       const areaList = getFieldList(ifoObj, "Mod_Area_list");
-      const ifoIdx = areaList.findIndex(a => getFieldStr(a, "Area_Name").toLowerCase() === areaResref);
+      const ifoIdx = areaList.findIndex((a) => getFieldStr(a, "Area_Name").toLowerCase() === areaResref);
       if (ifoIdx >= 0) {
         areaList.splice(ifoIdx, 1);
         // Re-index __struct_id
@@ -301,17 +510,29 @@ export function registerPaintTools(server: McpServer): void {
 
       // Clean up index entries
       index.areas.delete(areaResref);
-      index.creatures = index.creatures.filter(c => c.area !== areaResref);
+      index.creatures = index.creatures.filter((c) => c.area !== areaResref);
+
+      const nasherSync = await syncNasherSourceForIndex(index, {
+        reason: "delete_area",
+        removeDeleted: true,
+      });
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            deleted: { resref: areaResref, name: areaName },
-            remainingAreas: index.areas.size,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                deleted: { resref: areaResref, name: areaName },
+                remainingAreas: index.areas.size,
+                ...(nasherSync ? { nasherSync } : {}),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );
@@ -370,7 +591,13 @@ export function registerPaintTools(server: McpServer): void {
         const warnings: string[] = [];
 
         if (x < 0 || x >= areaWidth || y < 0 || y >= areaHeight) {
-          results.push({ x, y, tileId, orientation: ori, warnings: [`Out of bounds (area is ${areaWidth}x${areaHeight})`] });
+          results.push({
+            x,
+            y,
+            tileId,
+            orientation: ori,
+            warnings: [`Out of bounds (area is ${areaWidth}x${areaHeight})`],
+          });
           continue;
         }
 
@@ -380,7 +607,7 @@ export function registerPaintTools(server: McpServer): void {
         // Validate against neighbors
         const violations = validateTilePlacement(grid, x, y, areaWidth, areaHeight, tileset);
         if (violations.length > 0) {
-          warnings.push(...violations.map(v => `Constraint violation: ${v}`));
+          warnings.push(...violations.map((v) => `Constraint violation: ${v}`));
         }
 
         // Update GFF
@@ -398,11 +625,107 @@ export function registerPaintTools(server: McpServer): void {
         await jsonToGff(areDoc, areEntry.filePath);
       }
 
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "paint_tiles" });
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ success: true, area, placements: results }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { success: true, area, placements: results, ...(nasherSync ? { nasherSync } : {}) },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // ─── paint_terrain ────────────────────────────────────────────────────
+
+  server.tool(
+    "paint_terrain",
+    "Paint a terrain type at tile positions, re-solving shared-corner neighbors like the NWN toolset terrain brush.",
+    {
+      area: z.string().describe("Area resref"),
+      terrain: z.string().describe("Terrain type name from the area's tileset, e.g. 'pit' or 'forest'"),
+      tiles: z.string().describe("JSON array of tile positions to paint: [{x, y}]"),
+    },
+    { idempotentHint: true },
+    async ({ area, terrain, tiles: tilesJson }) => {
+      let tiles: TerrainPaintTile[];
+      try {
+        tiles = parseTerrainPaintTiles(tilesJson);
+      } catch (e) {
+        return { content: [{ type: "text", text: `Invalid tiles JSON: ${e}` }] };
+      }
+
+      const index = requireIndex();
+      const areaResref = area.toLowerCase();
+      const areKey = `${areaResref}.are`;
+      const areDoc = index.parsedGff.get(areKey);
+      if (!areDoc) {
+        return { content: [{ type: "text", text: `Area not found: ${area}` }] };
+      }
+
+      const are = areDoc as GffObj;
+      const areaWidth = getFieldNum(are, "Width");
+      const areaHeight = getFieldNum(are, "Height");
+      const tileList = getFieldList(are, "Tile_List");
+      const tilesetResref = getFieldStr(are, "Tileset").toLowerCase();
+
+      const resmanOpts = await buildResmanOptions(index);
+      const tileset = await getTilesetInfo(tilesetResref, resmanOpts, index);
+      const resolvedTerrain = resolveTerrainName(tileset, terrain);
+      if (!resolvedTerrain) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Terrain not found: ${terrain}. Available: ${listTerrainNames(tileset)}`,
+            },
+          ],
+        };
+      }
+
+      const grid = buildTileGrid(tileList as GffObj[], areaWidth, areaHeight);
+      const result = paintTerrainTiles(areaWidth, areaHeight, tileset, grid, resolvedTerrain, tiles);
+
+      for (const placement of result.placements) {
+        const areaIdx = placement.y * areaWidth + placement.x;
+        const tileEntry = tileList[areaIdx] as GffObj;
+        setFieldNum(tileEntry, "Tile_ID", placement.tileId, "int");
+        setFieldNum(tileEntry, "Tile_Orientation", placement.orientation, "int");
+        setFieldNum(tileEntry, "Tile_Height", 0, "int");
+      }
+
+      const areEntry = index.resources.get(areKey);
+      if (areEntry) {
+        await jsonToGff(areDoc, areEntry.filePath);
+      }
+
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "paint_terrain" });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                area: areaResref,
+                terrain: resolvedTerrain,
+                requestedTiles: tiles,
+                placements: result.placements,
+                warnings: result.warnings,
+                ...(nasherSync ? { nasherSync } : {}),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );
@@ -414,14 +737,31 @@ export function registerPaintTools(server: McpServer): void {
     "Place a multi-tile group (e.g. 'Temple_3x2', 'Lodge_2x2') at a grid position. Validates bounds and edge constraints.",
     {
       area: z.string().describe("Area resref"),
-      feature: z.string().describe("Group name (e.g. 'Temple_3x2', 'Lodge_2x2') — use get_tileset_details to see available groups"),
+      feature: z
+        .string()
+        .describe("Group name (e.g. 'Temple_3x2', 'Lodge_2x2') — use get_tileset_details to see available groups"),
       x: z.string().describe("Bottom-left column of the feature (0-based)"),
       y: z.string().describe("Bottom-left row of the feature (0-based)"),
+      transform: z
+        .enum([...GROUP_TRANSFORMS, "random"])
+        .optional()
+        .describe("Whole-group transform: none (default), rotate90, rotate180, rotate270, or random"),
     },
     { idempotentHint: true },
-    async ({ area, feature, x: xStr, y: yStr }) => {
+    async ({ area, feature, x: xStr, y: yStr, transform: transformStr }) => {
       const x = parseInt(xStr, 10);
       const y = parseInt(yStr, 10);
+      const transformRequest = parseGroupTransformRequest(transformStr);
+      if (!transformRequest) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `transform must be one of: ${[...GROUP_TRANSFORMS, "random"].join(", ")}`,
+            },
+          ],
+        };
+      }
       const index = requireIndex();
       const areKey = `${area.toLowerCase()}.are`;
       const areDoc = index.parsedGff.get(areKey);
@@ -439,65 +779,79 @@ export function registerPaintTools(server: McpServer): void {
       const tileset = await getTilesetInfo(tilesetResref, resmanOpts, index);
 
       // Find the group by name (case-insensitive)
-      const group = tileset.groups.find(g => g.name.toLowerCase() === feature.toLowerCase());
+      const group = tileset.groups.find((g) => g.name.toLowerCase() === feature.toLowerCase());
       if (!group) {
-        const available = tileset.groups.map(g => `${g.name} (${g.columns}x${g.rows})`).join(", ");
+        const available = tileset.groups.map((g) => `${g.name} (${g.columns}x${g.rows})`).join(", ");
         return { content: [{ type: "text", text: `Group not found: ${feature}. Available: ${available}` }] };
       }
 
+      const baseGrid = buildTileGrid(tileList as GffObj[], areaWidth, areaHeight);
+      const candidateTransforms = transformRequest === "random" ? [...GROUP_TRANSFORMS] : [transformRequest];
+      const validTransforms: Array<{
+        transform: GroupTransform;
+        dimensions: TransformedGroupDimensions;
+        placements: TransformedGroupPlacement[];
+        warnings: string[];
+      }> = [];
+
+      for (const candidateTransform of candidateTransforms) {
+        const dimensions = getGroupTransformDimensions(group, candidateTransform);
+        if (!groupFits(x, y, dimensions, areaWidth, areaHeight)) continue;
+        const candidatePlacements = getTransformedGroupPlacements(group, x, y, candidateTransform);
+        const candidateGrid = applyGroupPlacementsToGrid(baseGrid, candidatePlacements, areaWidth);
+        validTransforms.push({
+          transform: candidateTransform,
+          dimensions,
+          placements: candidatePlacements,
+          warnings: collectGroupPlacementWarnings(
+            candidatePlacements,
+            dimensions,
+            candidateGrid,
+            areaWidth,
+            areaHeight,
+            tileset,
+          ),
+        });
+      }
+
+      const selected =
+        transformRequest === "random"
+          ? (() => {
+              const noWarning = validTransforms.filter((candidate) => candidate.warnings.length === 0);
+              const pool = noWarning.length > 0 ? noWarning : validTransforms;
+              const transform = pickRandomGroupTransform(pool.map((candidate) => candidate.transform));
+              return pool.find((candidate) => candidate.transform === transform) ?? pool[0];
+            })()
+          : validTransforms[0];
+
       // Check bounds
-      if (x < 0 || x + group.columns > areaWidth || y < 0 || y + group.rows > areaHeight) {
-        return { content: [{ type: "text", text: `Feature ${feature} (${group.columns}x${group.rows}) doesn't fit at (${x},${y}) in ${areaWidth}x${areaHeight} area` }] };
+      if (!selected) {
+        const sizes = candidateTransforms
+          .map((candidateTransform) => {
+            const dimensions = getGroupTransformDimensions(group, candidateTransform);
+            return `${candidateTransform}=${dimensions.columns}x${dimensions.rows}`;
+          })
+          .join(", ");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Feature ${feature} doesn't fit at (${x},${y}) in ${areaWidth}x${areaHeight} area with transform '${transformRequest}' (${sizes})`,
+            },
+          ],
+        };
       }
 
-      // Place tiles — group tileIds are in row-major order, bottom-to-top
-      // Group tile index: row * columns + col
-      const placements: Array<{ gx: number; gy: number; tileId: number }> = [];
-      const warnings: string[] = [];
-
-      for (let gr = 0; gr < group.rows; gr++) {
-        for (let gc = 0; gc < group.columns; gc++) {
-          const groupTileIdx = gr * group.columns + gc;
-          const tileId = group.tileIds[groupTileIdx];
-          if (tileId < 0) continue; // empty slot in group
-
-          const gx = x + gc;
-          const gy = y + gr;
-          const areaIdx = gy * areaWidth + gx;
-
-          // Update tile list
-          const tileEntry = tileList[areaIdx] as GffObj;
-          setFieldNum(tileEntry, "Tile_ID", tileId, "int");
-          setFieldNum(tileEntry, "Tile_Orientation", 0, "int");
-          setFieldNum(tileEntry, "Tile_Height", 0, "int");
-
-          placements.push({ gx, gy, tileId });
-        }
-      }
-
-      // Validate edge tiles against neighbors outside the feature
-      const grid: (TileGridEntry | null)[] = [];
-      for (let i = 0; i < areaWidth * areaHeight; i++) {
-        const entry = tileList[i];
-        if (entry) {
-          grid.push({
-            tileId: getFieldNum(entry, "Tile_ID"),
-            orientation: getFieldNum(entry, "Tile_Orientation"),
-          });
-        } else {
-          grid.push(null);
-        }
-      }
+      // Place tiles — group tileIds are transformed as one rigid footprint.
+      const placements = selected.placements;
+      const warnings = [...selected.warnings];
 
       for (const p of placements) {
-        // Only check edges that border non-feature tiles
-        const isEdge = p.gx === x || p.gx === x + group.columns - 1 || p.gy === y || p.gy === y + group.rows - 1;
-        if (isEdge) {
-          const violations = validateTilePlacement(grid, p.gx, p.gy, areaWidth, areaHeight, tileset);
-          if (violations.length > 0) {
-            warnings.push(`(${p.gx},${p.gy}): ${violations.join("; ")}`);
-          }
-        }
+        const areaIdx = p.gy * areaWidth + p.gx;
+        const tileEntry = tileList[areaIdx] as GffObj;
+        setFieldNum(tileEntry, "Tile_ID", p.tileId, "int");
+        setFieldNum(tileEntry, "Tile_Orientation", p.orientation, "int");
+        setFieldNum(tileEntry, "Tile_Height", 0, "int");
       }
 
       // Write back ARE
@@ -505,6 +859,8 @@ export function registerPaintTools(server: McpServer): void {
       if (areEntry) {
         await jsonToGff(areDoc, areEntry.filePath);
       }
+
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "paint_group" });
 
       // Load walkmesh for painted tiles to report material data
       const surfacemat = index.twodaTables.get("surfacemat") as TwoDATable | undefined;
@@ -518,7 +874,12 @@ export function registerPaintTools(server: McpServer): void {
             const wok = await getWokForTile(tile.model, resmanOpts, wokCacheDir);
             if (wok) {
               const summary = computeTileWalkSummary(wok, surfacemat);
-              tileMaterials.push({ gx: p.gx, gy: p.gy, dominantMaterial: summary.dominantMaterial, walkablePercent: summary.walkablePercent });
+              tileMaterials.push({
+                gx: p.gx,
+                gy: p.gy,
+                dominantMaterial: summary.dominantMaterial,
+                walkablePercent: summary.walkablePercent,
+              });
             }
           } catch {
             // Non-fatal
@@ -527,19 +888,27 @@ export function registerPaintTools(server: McpServer): void {
       }
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            area,
-            feature: group.name,
-            position: { x, y },
-            size: { columns: group.columns, rows: group.rows },
-            tilesPlaced: placements.length,
-            tileMaterials,
-            warnings,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                area,
+                feature: group.name,
+                position: { x, y },
+                transform: selected.transform,
+                size: { columns: selected.dimensions.columns, rows: selected.dimensions.rows },
+                tilesPlaced: placements.length,
+                tileMaterials,
+                warnings,
+                ...(nasherSync ? { nasherSync } : {}),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );
@@ -585,8 +954,8 @@ export function registerPaintTools(server: McpServer): void {
       const index = requireIndex();
       const { area } = params;
       // Parse numeric string params
-      const pf = (v: string | undefined) => v !== undefined ? parseFloat(v) : undefined;
-      const pi = (v: string | undefined) => v !== undefined ? parseInt(v, 10) : undefined;
+      const pf = (v: string | undefined) => (v !== undefined ? parseFloat(v) : undefined);
+      const pi = (v: string | undefined) => (v !== undefined ? parseInt(v, 10) : undefined);
       const areKey = `${area.toLowerCase()}.are`;
       const gitKey = `${area.toLowerCase()}.git`;
 
@@ -672,15 +1041,24 @@ export function registerPaintTools(server: McpServer): void {
         return { content: [{ type: "text", text: "No properties specified to change." }] };
       }
 
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "set_area_properties" });
+
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            area,
-            changes,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                area,
+                changes,
+                ...(nasherSync ? { nasherSync } : {}),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     },
   );

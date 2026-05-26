@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { degToRad, buildMinimalUtc, getGitDoc, updateAreaCounts } from "./git-helpers.js";
+import { describe, expect, it } from "vitest";
 import type { GffDocument, GffObj } from "../types/gff.js";
 import type { ModuleIndex } from "../types/module.js";
+import { buildMinimalUtc, degToRad, getGitDoc, updateAreaCounts } from "./git-helpers.js";
 
 describe("degToRad", () => {
   it("converts 0 degrees to 0 radians", () => {
@@ -123,6 +123,7 @@ function makeIndex(areaResref: string, gitDoc: GffDocument): ModuleIndex {
     baseTlk: null,
     hakList: [],
     customTlkName: "",
+    loadWarnings: [],
   };
 }
 
@@ -139,7 +140,7 @@ function makeGitDoc(creatureCount: number, placeableCount: number, doorCount: nu
     "Placeable List": { type: "list", value: makeList(placeableCount, 9) },
     "Door List": { type: "list", value: makeList(doorCount, 8) },
     "Encounter List": { type: "list", value: [] },
-    "TriggerList": { type: "list", value: [] },
+    TriggerList: { type: "list", value: [] },
     WaypointList: { type: "list", value: [] },
     SoundList: { type: "list", value: [] },
     StoreList: { type: "list", value: [] },

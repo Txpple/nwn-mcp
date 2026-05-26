@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getRotatedCorners, getRotatedCrossers } from "./tileset.js";
+import { getRotatedCorners, getRotatedCrossers, parseTilesetFile } from "./tileset.js";
 import type { TileDefinition } from "./tileset.js";
 
 // Minimal tile fixture with distinct values per corner/edge for clear rotation verification
@@ -126,5 +126,61 @@ describe("getRotatedCrossers", () => {
     expect(cr.right).toBe("Road"); // was top
     expect(cr.bottom).toBe("Stream"); // was right
     expect(cr.left).toBe("");      // was bottom
+  });
+});
+
+describe("parseTilesetFile", () => {
+  it("keeps .set corners raw so GIT orientation rotates toolset pit edges correctly", () => {
+    const tileset = parseTilesetFile(
+      `
+[GENERAL]
+Name=Test
+Default=Forest
+
+[TERRAIN TYPES]
+Count=2
+[TERRAIN0]
+Name=Forest
+[TERRAIN1]
+Name=Pit
+
+[CROSSER TYPES]
+Count=0
+
+[TILES]
+Count=1
+
+[TILE0]
+Model=pit_edge
+TopLeft=Pit
+TopRight=Forest
+BottomLeft=Pit
+BottomRight=Forest
+Top=
+Right=
+Bottom=
+Left=
+TopLeftHeight=0
+TopRightHeight=0
+BottomLeftHeight=0
+BottomRightHeight=0
+Orientation=180
+`,
+      "test",
+    );
+
+    expect(tileset.tiles[0].corners).toEqual({
+      topLeft: "pit",
+      topRight: "forest",
+      bottomLeft: "pit",
+      bottomRight: "forest",
+    });
+
+    expect(getRotatedCorners(tileset.tiles[0], 2)).toEqual({
+      topLeft: "forest",
+      topRight: "pit",
+      bottomLeft: "forest",
+      bottomRight: "pit",
+    });
   });
 });

@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads all prior sections of `adventure.md`, th
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, `## Environment`, and `## Actors` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -386,9 +386,9 @@ This data is used by downstream skills:
 
 ---
 
-### Phase 9: Repack
+### Phase 9: Save/Sync
 
-Call `repack_module()` to save all changes.
+Save/sync all changes. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -428,7 +428,7 @@ Call `repack_module()` to save all changes.
 - **16-character resref limit.** Plan quest names to be short: `rescue`, `herbs`, `curse`, `bones`.
 - **Tile coordinates:** Column = x (left to right), Row = y (bottom to top). World position = tile * 10.0 + 5.0 for center.
 - **Do NOT auto-export HTML reports.**
-- **Repack after all changes.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after all changes.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 - **No combat encounters.** Quest dialogs can reference danger but do NOT place hostile creatures or encounters. That's `/adventure-challenges`'s job.
 - **No XP/reward assignment.** Quest completion scripts should NOT call `GiveXPToCreature` or grant rewards. That's `/adventure-rewards`'s job. Exception: if an action script must give a quest item to the player, that's fine.
 - **Condition scripts use `int StartingConditional()`**, not `void main()`. Action scripts use `void main()`.

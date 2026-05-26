@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads all sections of `adventure.md`, then ass
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, `## Environment`, `## Actors`, `## Quests`, `## Challenges`, `## Affordances`, and `## Polish` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -365,9 +365,9 @@ Append a `## Rewards` section to `adventure.md`:
 
 ---
 
-### Phase 8: Repack
+### Phase 8: Save/Sync
 
-Call `repack_module()` to save all changes.
+Save/sync all changes. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -393,4 +393,4 @@ Call `repack_module()` to save all changes.
 - **Append to existing container ItemLists.** If `/adventure-affordances` already placed items in a container, read the existing items first and append — don't overwrite with a new list.
 - **XP should feel generous but not excessive.** The player should gain meaningful progress (60-80% to next level) but not level up twice from a single one-shot adventure.
 - **Reward power curve:** Boss reward > mid-adventure reward > creature drops > store items. This creates a clear progression of loot quality.
-- **Repack after all changes.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after all changes.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.

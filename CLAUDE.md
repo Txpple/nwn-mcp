@@ -5,9 +5,10 @@ MCP (Model Context Protocol) server for Neverwinter Nights Enhanced Edition modu
 ## Working Style
 
 - **Do NOT auto-export HTML reports** after creating or painting areas. Only export reports when the user explicitly asks for one.
-- **Always repack after creating/painting test areas** so the user can see them in the toolset. Mention that you repacked.
+- **Save after creating/painting test areas.** For standalone `.mod` workflows, call `repack_module` and mention that you repacked. For Nasher workflows, supported writes auto-sync to source; call `sync_nasher_source` at the end when mixed/unsupported tools wrote resources, and call `repack_module` only when a packed `.mod` is needed.
 - **MCP server restart required after code changes.** After editing TypeScript source and running `npm run build`, the MCP server must be restarted for new/changed tools to become available. Ask the user to restart before attempting to use newly added tools.
 - **Keep skills in sync with tools.** When adding, renaming, or changing tool parameters/behavior, immediately update the `.claude/skills/` SKILL.md files that reference those tools. The LLM follows skill instructions, not tool schemas — if a skill doesn't mention a parameter, the LLM won't use it.
+- **Nasher projects use cache plus source sync.** `load_module` auto-routes when it detects a Nasher project. Supported write tools edit `.nasher/cache/<target>` and return `nasherSync`; `sync_nasher_source` reruns unpack and is required after manual cache edits or write tools that do not report `nasherSync`.
 
 ## Design Intent
 
@@ -51,6 +52,8 @@ npm run start        # Run compiled output
 | `NWN_FOLDER_DATA` | *(empty)* | NWN game install dir — enables base game 2DA/TLK loading via resman |
 | `NWN_FOLDER_USER` | *(empty)* | NWN user documents dir — enables custom TLK, HAK, override/, development/ loading |
 | `MCP_FOLDER_TEMP` | `%TEMP%/nwn-mcp` | Temp directory for extracted modules |
+| `NASHER_BIN` | `nasher` | Nasher executable for optional Nasher text-source workflows |
+| `NWNT_BIN` | `nwn_nwnt` | NWNT executable for diagnostics |
 
 ## Architecture
 
@@ -61,7 +64,21 @@ npm run start        # Run compiled output
       → nwn_gff (serialize back) → nwn_erf (repack) → .mod file
 ```
 
-One module loaded at a time. `load_module` must be called before any other tool.
+One module loaded at a time. `load_module` must be called before any other tool. In a Nasher project, it may automatically route through `load_nasher_workspace`.
+
+### Nasher Adapter Workflow
+
+For a Nasher source repository, do not treat the packed `.mod` as the source of truth. `load_module` can remain the entry point because it auto-routes when it detects `nasher.cfg`; use the adapter tools directly when you need explicit target or clean-build control:
+
+1. `detect_nasher_project` — confirm `nasher.cfg`, executable availability, target names/files, and `.nasher/cache/<target>` paths.
+2. `load_nasher_workspace` — runs `nasher pack [target] --packUnchanged --overwritePackedFile:always --no-color`, then loads `.nasher/cache/<target>` as loose resources.
+3. Use normal MCP editing tools. They write binary resources in the cache directory. Area create/delete/paint/property updates, area/module script setters, `adventure_apply_layout`, and GIT writes through `writeBackGit()` auto-run Nasher unpack and return `nasherSync`.
+4. `sync_nasher_source` — reruns `nasher unpack [target] --file:<cacheDir> --removeDeleted:false --onMultipleSources:error --default --no-color`. Use it after manual cache edits or write paths that do not return `nasherSync` (for example arbitrary GFF/resource, blueprint, or dialog writes).
+5. Review with `git diff`.
+
+`clean: true` on `load_nasher_workspace` runs `nasher pack --clean` and may discard cache-only edits that were not synced. Use `nasher_status` to check the current source context, cache path, timestamps, and likely stale-cache signals. `repack_module` still packs the loaded loose resources, but in Nasher mode it only writes the packed module file; the text source tree remains the source of truth.
+
+Do not configure workspace root or target through MCP environment variables. These are project-specific Nasher concerns: use the current working directory, explicit `workspaceRoot` / `target` tool parameters when needed, or Nasher's own default target configuration.
 
 ### Tool Organization
 
@@ -195,7 +212,7 @@ The `wok_cache/` directory is lazy-initialized on first use via `ensureWokCacheD
 
 ## Zone-Based Terrain Solver
 
-`adventure_apply_layout` (adventure tool) takes the full `LayoutResult` from `adventure_generate_layout` and applies zones + crossers + features atomically via the zone solver (`src/util/zone-solver.ts`). `paint_tiles` and `paint_group` are base tools for direct/manual tile placement — no solving.
+`adventure_apply_layout` (adventure tool) takes the full `LayoutResult` from `adventure_generate_layout` and applies zones + crossers + features atomically via the zone solver (`src/util/zone-solver.ts`). `paint_terrain` is the toolset-style terrain brush: it changes shared corner terrain values and re-solves affected neighbors. `paint_tiles` and `paint_group` are base tools for direct/manual tile placement.
 
 `get_tileset_details` defaults to `detail: "summary"` (~2KB) which includes terrain types, crosser types, valid terrain adjacencies, and group names. Use `detail: "full"` for the complete 60-100KB tile catalog.
 
@@ -207,11 +224,11 @@ The **only** determining factors for tile selection from .set files are:
 - **Edge crossers:** `Top`, `Right`, `Bottom`, `Left`
 - **Orientation:** the `.set` `Orientation` field (0/90/180/270 degrees)
 
-The `.set` file `[PRIMARY RULES]` and `[SECONDARY RULES]` sections are **NOT functional for tile solving**. They are toolset autotiling rules for terrain propagation when painting in the toolset. They do not restrict which tiles can be placed where. **IGNORE them entirely.**
+The `.set` file `[PRIMARY RULES]` and `[SECONDARY RULES]` sections are toolset autotiling rules for terrain propagation when painting terrain. They are **not** constraints for exact tile placement. `paint_terrain` follows the toolset-style behavior by painting the requested tile's shared corner terrain and then matching affected positions against the `[TILE*]` corner/crosser definitions.
 
 ### Tile Orientation Normalization
 
-The `.set` `Orientation` field specifies the rotation (degrees) at which the tile's corners and crossers are defined in the file. At parse time in `tileset.ts`, corners and crossers are **un-rotated by the `.set` Orientation** to normalize all tiles to GIT orientation 0. This ensures `getRotatedCorners(tile, gitOri)` returns the correct effective corners for any GIT placement orientation.
+The `.set` `Orientation` field specifies the tile's natural authored rotation. `tileset.ts` keeps corner and crosser definitions raw from the `.set` file; `getRotatedCorners(tile, gitOri)` applies the GIT `Tile_Orientation` at placement time.
 
 The solver also **prefers tiles at their natural `.set` Orientation** — the rotation the 3D model was designed for — over rotated alternatives that produce the same corner pattern. This prevents visual artifacts from tiles whose model geometry doesn't align properly when placed at non-native orientations.
 
@@ -232,6 +249,7 @@ You cannot skip terrains in the chain. For example, in `tno01` you must place a 
 - **Numeric tool params must use `z.string()`.** The MCP SDK validates JSON Schema before Zod transforms execute, so `z.coerce.number()` fails when clients send strings. Use `z.string()` + `toF()`/`toI()` helpers from `src/util/params.ts`. Same for complex array params — use `z.string()` + `JSON.parse()`.
 - **Resman tools are slow.** Every invocation initializes the full resman stack. Default timeout (30s) is too short for piped operations — `resmanCatToJson()` uses 120s.
 - **Temp dir contains cache subdirs.** `resman_2da/`, `tileset_cache/`, `wok_cache/`, `blueprint_cache/` — all auto-excluded from `erfPack()` by the `isFile()` filter. Never pack these into the module.
+- **Nasher cache is not the source tree.** Supported area/GIT write paths auto-sync and return `nasherSync`. If a write response lacks `nasherSync`, or after manual cache edits, call `sync_nasher_source` before expecting `.json`, `.nwnt`, or `.nss` sources to contain the changes. Use `clean:true` only after syncing or when you intentionally want to discard cache edits.
 - **`validate_module` false positives.** Base game scripts (`nw_c2_default5`, etc.) and items (`nw_wblms001`) are resolved at runtime — filter these "missing" references.
 - **Primary/secondary rules in .set files are NOT functional and must be IGNORED.** They are toolset autotiling propagation rules, not tile placement constraints. The tile solver works entirely by matching corner terrains, corner heights, edge crossers, and the `.set` Orientation field.
 - **Height tiles excluded from solving.** Tiles with any corner height > 0 are filtered out. All solver-placed tiles are flat.

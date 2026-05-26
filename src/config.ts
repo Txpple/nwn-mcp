@@ -13,6 +13,12 @@ export const NWN_FOLDER_DATA = process.env.NWN_FOLDER_DATA || "";
 /** Path to the NWN user documents directory — enables custom TLK, HAK, override/, development/ */
 export const NWN_FOLDER_USER = process.env.NWN_FOLDER_USER || "";
 
+/** Optional Nasher executable. Defaults to PATH resolution. */
+export const NASHER_BIN = process.env.NASHER_BIN || "nasher";
+
+/** Optional NWNT executable for diagnostics. Defaults to PATH resolution. */
+export const NWNT_BIN = process.env.NWNT_BIN || "nwn_nwnt";
+
 export const TEMP_BASE = process.env.MCP_FOLDER_TEMP || path.join(os.tmpdir(), "nwn-mcp");
 
 export function nimtool(name: string): string {

@@ -155,29 +155,19 @@ export function parseTilesetFile(content: string, resref: string): TilesetInfo {
     const blH = parseInt(s.BottomLeftHeight ?? "0", 10);
     const brH = parseInt(s.BottomRightHeight ?? "0", 10);
 
-    // The .set file Orientation field (degrees: 0/90/180/270) specifies the
-    // rotation at which the tile's corners and crossers are defined. To normalize
-    // all tiles to GIT orientation 0, we un-rotate by the .set Orientation.
-    // This ensures getRotatedCorners(tile, gitOri) returns the correct effective
-    // corners for any GIT placement orientation.
     const setOrientation = parseInt(s.Orientation ?? "0", 10);
-    const oriSteps = Math.round(setOrientation / 90) % 4;
-    let corners: TileCorners = {
+    const corners: TileCorners = {
       topLeft: (s.TopLeft ?? "").toLowerCase(),
       topRight: (s.TopRight ?? "").toLowerCase(),
       bottomLeft: (s.BottomLeft ?? "").toLowerCase(),
       bottomRight: (s.BottomRight ?? "").toLowerCase(),
     };
-    let crossers: TileCrossers = {
+    const crossers: TileCrossers = {
       top: (s.Top ?? "").toLowerCase(),
       right: (s.Right ?? "").toLowerCase(),
       bottom: (s.Bottom ?? "").toLowerCase(),
       left: (s.Left ?? "").toLowerCase(),
     };
-    if (oriSteps > 0) {
-      corners = unrotateCorners(corners, oriSteps);
-      crossers = unrotateCrossers(crossers, oriSteps);
-    }
 
     tiles.push({
       id: i,
@@ -427,42 +417,9 @@ export async function listAllTilesets(resmanOpts: ResmanOptions): Promise<string
 // ─── Tile Orientation Helpers ───────────────────────────────────────────────
 
 /**
- * Un-rotate corners by N steps (inverse of forward rotation).
- * Used at parse time to normalize .set file corners (defined at the tile's
- * Orientation) back to GIT orientation 0.
- *
- * Unrotating by N steps = forward rotating by (4-N) steps.
- */
-function unrotateCorners(c: TileCorners, steps: number): TileCorners {
-  const inv = (4 - (steps % 4)) % 4;
-  switch (inv) {
-    case 0: return { ...c };
-    case 1: return { topLeft: c.topRight, topRight: c.bottomRight, bottomRight: c.bottomLeft, bottomLeft: c.topLeft };
-    case 2: return { topLeft: c.bottomRight, topRight: c.bottomLeft, bottomRight: c.topLeft, bottomLeft: c.topRight };
-    case 3: return { topLeft: c.bottomLeft, topRight: c.topLeft, bottomRight: c.topRight, bottomLeft: c.bottomRight };
-    default: return { ...c };
-  }
-}
-
-/** Un-rotate crossers by N steps. Same inverse logic as unrotateCorners. */
-function unrotateCrossers(cr: TileCrossers, steps: number): TileCrossers {
-  const inv = (4 - (steps % 4)) % 4;
-  switch (inv) {
-    case 0: return { ...cr };
-    case 1: return { top: cr.right, right: cr.bottom, bottom: cr.left, left: cr.top };
-    case 2: return { top: cr.bottom, right: cr.left, bottom: cr.top, left: cr.right };
-    case 3: return { top: cr.left, right: cr.top, bottom: cr.right, left: cr.bottom };
-    default: return { ...cr };
-  }
-}
-
-/**
  * Get the effective corners of a tile after applying orientation rotation.
- * When a tile is rotated, its corners rotate with it.
- *
- * The tile's stored corners are normalized to GIT orientation 0 at parse time
- * (un-rotated from the .set Orientation). After rotation by the GIT placement
- * orientation, the result is the corners as rendered by the engine.
+ * Tile corner definitions are read from the .set file as-is; GIT
+ * Tile_Orientation rotates those definitions at placement time.
  */
 export function getRotatedCorners(tile: TileDefinition, orientation: number): TileCorners {
   const c = tile.corners;

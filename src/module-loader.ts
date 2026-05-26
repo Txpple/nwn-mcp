@@ -12,10 +12,11 @@ import type { GffDocument, GffObj } from "./types/gff.js";
 import type {
   ModuleIndex, ResourceEntry, TagLocation, ScriptUsage,
   AreaSummary, DialogSummary, CreatureRecord, ItemRecord,
-  TwoDATable, TlkTable,
+  TwoDATable, TlkTable, NasherSourceContext,
 } from "./types/module.js";
 
 let currentIndex: ModuleIndex | null = null;
+const BATCH_SIZE = 20;  // Max concurrent child processes per batch
 
 export function getIndex(): ModuleIndex | null {
   return currentIndex;
@@ -60,16 +61,7 @@ export async function buildResmanOptions(index: ModuleIndex): Promise<ResmanOpti
 }
 
 export async function loadModule(modPath: string): Promise<ModuleIndex> {
-  // Clean up previous
-  if (currentIndex) {
-    await cleanupTempDir(currentIndex.tempDir).catch(() => {});
-  }
-  clearWokCache();
-  clearTilesetCache();
-  clearUndoStack();
-
-  const BATCH_SIZE = 20;  // Max concurrent child processes per batch
-  const loadWarnings: Array<{ type: string; message: string }> = [];
+  await prepareForNewLoad();
   const absPath = path.resolve(modPath);
   const tempDir = await createTempDir(absPath);
   setWokCacheDir(tempDir);
@@ -79,6 +71,53 @@ export async function loadModule(modPath: string): Promise<ModuleIndex> {
 
   // List all resources
   const fileNames = await erfList(absPath);
+  const index = await indexResourceDirectory(absPath, tempDir, fileNames);
+  currentIndex = index;
+  return index;
+}
+
+export async function loadModuleDirectory(
+  resourceDir: string,
+  sourceContext?: NasherSourceContext
+): Promise<ModuleIndex> {
+  await prepareForNewLoad();
+  const absDir = path.resolve(resourceDir);
+  setWokCacheDir(absDir);
+
+  const fileNames = await listLooseResourceFiles(absDir);
+  const modPath = sourceContext?.targetFile
+    ? path.resolve(sourceContext.targetFile)
+    : path.join(sourceContext?.workspaceRoot || absDir, `${sourceContext?.target || path.basename(absDir)}.mod`);
+  const index = await indexResourceDirectory(modPath, absDir, fileNames, sourceContext);
+  currentIndex = index;
+  return index;
+}
+
+async function prepareForNewLoad(): Promise<void> {
+  if (currentIndex) {
+    if (!currentIndex.sourceContext) {
+      await cleanupTempDir(currentIndex.tempDir).catch(() => {});
+    }
+  }
+  clearWokCache();
+  clearTilesetCache();
+  clearUndoStack();
+}
+
+async function listLooseResourceFiles(resourceDir: string): Promise<string[]> {
+  const entries = await fs.readdir(resourceDir, { withFileTypes: true });
+  return entries
+    .filter(entry => entry.isFile())
+    .map(entry => entry.name);
+}
+
+async function indexResourceDirectory(
+  modPath: string,
+  tempDir: string,
+  fileNames: string[],
+  sourceContext?: NasherSourceContext
+): Promise<ModuleIndex> {
+  const loadWarnings: Array<{ type: string; message: string }> = [];
   const resources = new Map<string, ResourceEntry>();
 
   for (const fileName of fileNames) {
@@ -306,8 +345,8 @@ export async function loadModule(modPath: string): Promise<ModuleIndex> {
     }
   }
 
-  currentIndex = {
-    modPath: absPath,
+  return {
+    modPath,
     tempDir,
     moduleName,
     resources,
@@ -324,9 +363,8 @@ export async function loadModule(modPath: string): Promise<ModuleIndex> {
     hakList,
     customTlkName,
     loadWarnings,
+    sourceContext,
   };
-
-  return currentIndex;
 }
 
 function indexGffDocument(
