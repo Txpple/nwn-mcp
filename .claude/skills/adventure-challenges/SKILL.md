@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads all prior sections of `adventure.md`, th
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, `## Environment`, `## Actors`, and `## Quests` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -391,9 +391,9 @@ This data is used by downstream skills:
 
 ---
 
-### Phase 10: Repack
+### Phase 10: Save/Sync
 
-Call `repack_module()` to save all changes.
+Save/sync all changes. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -679,7 +679,7 @@ Differentiate similar creatures with a numeric suffix: `hos_gobwar`, `hos_gobmag
 - **Group roles for variety.** Every group of 3+ should have at least 2 different roles. Most enemies use melee (sword + shield), but include variety.
 - **Equipment only on humanoids.** Non-humanoid creatures (spiders, undead skeletons, beasts) use `naturalAC` instead of armor and rely on claws/bites, not weapons.
 - **Verify item resrefs resolve.** If `resman_search` doesn't find an expected item, try alternate resref patterns or substitute a similar item.
-- **Repack after all changes.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after all changes.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 - **No quest logic.** Don't modify dialogs, journal entries, or quest state. That's `/adventure-quests`'s job (already done).
 - **No loot or XP.** Don't place items on the ground or assign XP values. That's `/adventure-affordances` and `/adventure-rewards`.
 - **Scale damage to level.** Trap damage and creature stats should match the adventure's target level.

@@ -19,19 +19,21 @@
  *   - Edge crossers: Top, Right, Bottom, Left
  *   - Orientation: the .set Orientation field (0/90/180/270 degrees)
  *
- * The .set file [PRIMARY RULES] and [SECONDARY RULES] sections are NOT used
- * for tile solving. They are toolset autotiling rules for terrain propagation
- * and do not restrict tile placement. IGNORE them entirely.
+ * The .set file [PRIMARY RULES] and [SECONDARY RULES] sections describe
+ * toolset terrain-paint propagation. They are not placement constraints for an
+ * already chosen tile ID. Terrain painting is modeled by changing shared corner
+ * terrain values and re-solving the affected tile positions from the [TILE*]
+ * corner/crosser definitions.
  *
- * The .set Orientation field specifies the rotation at which the tile's corners
- * and crossers are defined. At parse time, corners/crossers are un-rotated to
- * GIT orientation 0 so the solver can treat all tiles uniformly. The solver
- * also prefers tiles at their natural .set Orientation (the rotation the model
- * was designed for) over rotated alternatives with matching corners.
+ * The .set Orientation field records the tile's natural authored orientation.
+ * The solver keeps .set corner/crosser definitions raw and applies the GIT
+ * Tile_Orientation rotation when evaluating a placement. It also prefers tiles
+ * at their natural .set Orientation over rotated alternatives with matching
+ * corners.
  */
 
-import type { TilesetInfo, TileCorners, TileCrossers } from "./tileset.js";
-import type { TilePlacement } from "./tile-solver.js";
+import type { TileGridEntry, TilePlacement } from "./tile-solver.js";
+import type { TilesetInfo, TileCrossers } from "./tileset.js";
 import { getRotatedCorners, getRotatedCrossers } from "./tileset.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -78,6 +80,27 @@ interface CrosserEdges {
   left: string;
 }
 
+export interface TerrainPaintTile {
+  x: number;
+  y: number;
+}
+
+export interface TerrainPaintResult {
+  placements: Array<{
+    x: number;
+    y: number;
+    tileId: number;
+    orientation: number;
+    previousTileId: number;
+    previousOrientation: number;
+  }>;
+  warnings: Array<{
+    x: number;
+    y: number;
+    message: string;
+  }>;
+}
+
 // ─── Corner Grid ────────────────────────────────────────────────────────────
 
 /**
@@ -86,19 +109,24 @@ interface CrosserEdges {
  * Each tile (tx,ty) has corners:
  *   BL = corner(tx, ty)     BR = corner(tx+1, ty)
  *   TL = corner(tx, ty+1)   TR = corner(tx+1, ty+1)
- *
+ */
+
 /**
  * Compute the set of valid terrain adjacency pairs for a tileset.
  * Two terrains can be adjacent only if some flat, non-group tile has both
- * in its corners.  Returns a Set of "terrainA|terrainB" strings (both
+ * in its corners. Returns a Set of "terrainA|terrainB" strings (both
  * directions included).
  */
 export function computeValidPairs(tileset: TilesetInfo): Set<string> {
   const validPairs = new Set<string>();
   for (const tile of tileset.tiles) {
     if (tile.groupId !== null || !tile.flat) continue;
-    const c = [tile.corners.topLeft.toLowerCase(), tile.corners.topRight.toLowerCase(),
-               tile.corners.bottomLeft.toLowerCase(), tile.corners.bottomRight.toLowerCase()];
+    const c = [
+      tile.corners.topLeft.toLowerCase(),
+      tile.corners.topRight.toLowerCase(),
+      tile.corners.bottomLeft.toLowerCase(),
+      tile.corners.bottomRight.toLowerCase(),
+    ];
     for (let i = 0; i < c.length; i++) {
       for (let j = i + 1; j < c.length; j++) {
         if (c[i] !== c[j]) {
@@ -140,9 +168,9 @@ export function buildCornerGrid(
     const c = getRotatedCorners(tile, f.orientation);
 
     const corners: Array<[number, number, string]> = [
-      [f.x,     f.y,     c.bottomLeft.toLowerCase()],
-      [f.x + 1, f.y,     c.bottomRight.toLowerCase()],
-      [f.x,     f.y + 1, c.topLeft.toLowerCase()],
+      [f.x, f.y, c.bottomLeft.toLowerCase()],
+      [f.x + 1, f.y, c.bottomRight.toLowerCase()],
+      [f.x, f.y + 1, c.topLeft.toLowerCase()],
       [f.x + 1, f.y + 1, c.topRight.toLowerCase()],
     ];
     for (const [cx, cy, terrain] of corners) {
@@ -159,10 +187,7 @@ export function buildCornerGrid(
     for (const { x, y } of zone.tiles) {
       if (x < 0 || x >= width || y < 0 || y >= height) continue;
 
-      const corners = [
-        idx(x, y), idx(x + 1, y),
-        idx(x, y + 1), idx(x + 1, y + 1),
-      ];
+      const corners = [idx(x, y), idx(x + 1, y), idx(x, y + 1), idx(x + 1, y + 1)];
       for (const i of corners) {
         if (!locked.has(i)) {
           grid[i] = zone.terrain;
@@ -291,20 +316,146 @@ export function findTileByCorners(
   if (matches.length === 0) return null;
 
   // Prefer tiles without doors for simpler geometry
-  const noDoors = matches.filter(m => tileset.tiles[m.tileId].doors === 0);
+  const noDoors = matches.filter((m) => tileset.tiles[m.tileId].doors === 0);
   let pool = noDoors.length > 0 ? noDoors : matches;
 
   // Prefer tiles at their natural .set Orientation — these tiles were designed
   // to look correct at this rotation. Tiles at non-natural orientations have
   // correct corner terrains but their 3D model geometry may not align properly
   // with neighboring tiles.
-  const natural = pool.filter(m => {
+  const natural = pool.filter((m) => {
     const naturalOri = Math.round(tileset.tiles[m.tileId].orientation / 90) % 4;
     return m.orientation === naturalOri;
   });
   if (natural.length > 0) pool = natural;
 
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Paint terrain by changing tile-corner terrain values, then re-solving every
+ * tile that shares those changed corners. This mirrors toolset terrain paint:
+ * a single top-edge pit tile changes a 3x2 rectangle because neighboring tiles
+ * share the painted tile's four corner points.
+ */
+export function paintTerrainTiles(
+  width: number,
+  height: number,
+  tileset: TilesetInfo,
+  grid: Array<TileGridEntry | null>,
+  terrain: string,
+  tiles: TerrainPaintTile[],
+): TerrainPaintResult {
+  const lcTerrain = terrain.toLowerCase();
+  const cw = width + 1;
+  const cornerGrid = new Array<string>(cw * (height + 1)).fill("");
+  const crosserGrid: CrosserEdges[] = new Array<CrosserEdges>(width * height);
+  const warnings: TerrainPaintResult["warnings"] = [];
+  const noCrossers: CrosserEdges = { top: "", right: "", bottom: "", left: "" };
+
+  const cornerIdx = (cx: number, cy: number) => cy * cw + cx;
+  const setCorner = (cx: number, cy: number, value: string, x: number, y: number) => {
+    const idx = cornerIdx(cx, cy);
+    const existing = cornerGrid[idx];
+    if (existing && existing !== value) {
+      warnings.push({
+        x,
+        y,
+        message: `Existing corner terrain conflict at (${cx},${cy}): kept '${existing}', ignored '${value}'`,
+      });
+      return;
+    }
+    cornerGrid[idx] = value;
+  };
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      const entry = grid[idx];
+      const tile = entry ? tileset.tiles[entry.tileId] : null;
+      if (!entry || !tile) {
+        warnings.push({ x, y, message: `Cannot read existing tile ${entry?.tileId ?? "missing"}` });
+        crosserGrid[idx] = noCrossers;
+        continue;
+      }
+
+      const corners = getRotatedCorners(tile, entry.orientation);
+      setCorner(x, y, corners.bottomLeft.toLowerCase(), x, y);
+      setCorner(x + 1, y, corners.bottomRight.toLowerCase(), x, y);
+      setCorner(x, y + 1, corners.topLeft.toLowerCase(), x, y);
+      setCorner(x + 1, y + 1, corners.topRight.toLowerCase(), x, y);
+      crosserGrid[idx] = getRotatedCrossers(tile, entry.orientation);
+    }
+  }
+
+  const affected = new Set<number>();
+  const markCornerAffected = (cx: number, cy: number) => {
+    for (const ty of [cy - 1, cy]) {
+      for (const tx of [cx - 1, cx]) {
+        if (tx >= 0 && tx < width && ty >= 0 && ty < height) affected.add(ty * width + tx);
+      }
+    }
+  };
+
+  for (const tile of tiles) {
+    if (tile.x < 0 || tile.x >= width || tile.y < 0 || tile.y >= height) {
+      warnings.push({ x: tile.x, y: tile.y, message: `Out of bounds for ${width}x${height} area` });
+      continue;
+    }
+
+    const corners = [
+      [tile.x, tile.y],
+      [tile.x + 1, tile.y],
+      [tile.x, tile.y + 1],
+      [tile.x + 1, tile.y + 1],
+    ] as const;
+    for (const [cx, cy] of corners) {
+      cornerGrid[cornerIdx(cx, cy)] = lcTerrain;
+      markCornerAffected(cx, cy);
+    }
+  }
+
+  const placements: TerrainPaintResult["placements"] = [];
+  for (const idx of [...affected].sort((a, b) => a - b)) {
+    const x = idx % width;
+    const y = Math.floor(idx / width);
+    const previous = grid[idx];
+    if (!previous) continue;
+
+    const wantCorners = {
+      tl: cornerGrid[cornerIdx(x, y + 1)],
+      tr: cornerGrid[cornerIdx(x + 1, y + 1)],
+      bl: cornerGrid[cornerIdx(x, y)],
+      br: cornerGrid[cornerIdx(x + 1, y)],
+    };
+    const wantCrossers = crosserGrid[idx] ?? noCrossers;
+    const hasCrossers = !!(wantCrossers.top || wantCrossers.right || wantCrossers.bottom || wantCrossers.left);
+
+    let placement = findTileByCorners(wantCorners, wantCrossers, tileset);
+    if (!placement && hasCrossers) {
+      placement = findTileByCorners(wantCorners, noCrossers, tileset);
+      if (placement) warnings.push({ x, y, message: "Dropped crossers while matching painted terrain" });
+    }
+    if (!placement) {
+      warnings.push({
+        x,
+        y,
+        message: `No tile matches painted corners TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br}`,
+      });
+      continue;
+    }
+
+    placements.push({
+      x,
+      y,
+      tileId: placement.tileId,
+      orientation: placement.orientation,
+      previousTileId: previous.tileId,
+      previousOrientation: previous.orientation,
+    });
+  }
+
+  return { placements, warnings };
 }
 
 // ─── Area Solver ────────────────────────────────────────────────────────────
@@ -332,8 +483,8 @@ export function solveArea(
 ): ZoneSolverResult {
   // Normalize terrain/crosser names to lowercase for case-insensitive matching
   const lcDefault = defaultTerrain.toLowerCase();
-  const lcZones = zones.map(z => ({ ...z, terrain: z.terrain.toLowerCase() }));
-  const lcCrossers = crossers.map(c => ({ ...c, type: c.type.toLowerCase() }));
+  const lcZones = zones.map((z) => ({ ...z, terrain: z.terrain.toLowerCase() }));
+  const lcCrossers = crossers.map((c) => ({ ...c, type: c.type.toLowerCase() }));
 
   const cornerGrid = buildCornerGrid(width, height, lcDefault, lcZones, features, tileset);
   const crosserGrid = buildCrosserGrid(width, height, lcCrossers, cornerGrid, lcDefault);
@@ -347,7 +498,10 @@ export function solveArea(
   {
     const seen = new Set<string>();
     for (const t of cornerGrid) {
-      if (!seen.has(t)) { seen.add(t); allowedTerrains.push(t); }
+      if (!seen.has(t)) {
+        seen.add(t);
+        allowedTerrains.push(t);
+      }
     }
   }
 
@@ -367,8 +521,11 @@ export function solveArea(
           const pairKey = `${t}|${r}`;
           if (!reportedPairs.has(pairKey)) {
             reportedPairs.add(pairKey);
-            adjacencyErrors.push({ x: cx, y: cy,
-              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${r}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.` });
+            adjacencyErrors.push({
+              x: cx,
+              y: cy,
+              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${r}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.`,
+            });
           }
         }
       }
@@ -379,8 +536,11 @@ export function solveArea(
           const pairKey = `${t}|${u}`;
           if (!reportedPairs.has(pairKey)) {
             reportedPairs.add(pairKey);
-            adjacencyErrors.push({ x: cx, y: cy,
-              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${u}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.` });
+            adjacencyErrors.push({
+              x: cx,
+              y: cy,
+              message: `INCOMPATIBLE TERRAIN ADJACENCY: '${t}' and '${u}' have no transition tiles in this tileset. Add an intermediate terrain zone between them.`,
+            });
           }
         }
       }
@@ -552,7 +712,8 @@ export function solveArea(
       if (!placement) {
         placement = findTileByCorners(
           { tl: lcDefault, tr: lcDefault, bl: lcDefault, br: lcDefault },
-          noCrossers, tileset,
+          noCrossers,
+          tileset,
         );
         if (placement) {
           warnMsg = `No valid tile for zone corners; fell back to default terrain '${lcDefault}' (wanted TL=${wantCorners.tl} TR=${wantCorners.tr} BL=${wantCorners.bl} BR=${wantCorners.br})`;
@@ -563,7 +724,11 @@ export function solveArea(
         placements.push({ x, y, tileId: placement.tileId, orientation: placement.orientation });
         if (warnMsg) warnings.push({ x, y, message: warnMsg });
       } else {
-        warnings.push({ x, y, message: `No tile found at all — this should never happen if the tileset has a default tile` });
+        warnings.push({
+          x,
+          y,
+          message: `No tile found at all — this should never happen if the tileset has a default tile`,
+        });
       }
     }
   }
@@ -587,10 +752,7 @@ interface FreeCorner {
  * A corner is "free" if no already-solved tile (left or below) shares it
  * and it's not locked by a feature tile.
  */
-function getFreeCorners(
-  x: number, y: number, cw: number,
-  featureLocked: Set<number>,
-): FreeCorner[] {
+function getFreeCorners(x: number, y: number, cw: number, featureLocked: Set<number>): FreeCorner[] {
   const idx = (cx: number, cy: number) => cy * cw + cx;
   const result: FreeCorner[] = [];
 
@@ -629,7 +791,7 @@ function getFreeCorners(
 function validateCrosserContinuity(
   width: number,
   height: number,
-  crosserGrid: CrosserEdges[],
+  _crosserGrid: CrosserEdges[],
   placements: ZoneSolverResult["placements"],
   features: FeatureTile[],
   tileset: TilesetInfo,
@@ -657,7 +819,11 @@ function validateCrosserContinuity(
       const left = resolvedCrossers.get(y * width + x);
       const right = resolvedCrossers.get(y * width + x + 1);
       if (left && right && left.right !== right.left) {
-        warnings.push({ x, y, message: `Crosser mismatch: (${x},${y}).right="${left.right}" vs (${x + 1},${y}).left="${right.left}"` });
+        warnings.push({
+          x,
+          y,
+          message: `Crosser mismatch: (${x},${y}).right="${left.right}" vs (${x + 1},${y}).left="${right.left}"`,
+        });
       }
     }
   }
@@ -668,7 +834,11 @@ function validateCrosserContinuity(
       const bottom = resolvedCrossers.get(y * width + x);
       const top = resolvedCrossers.get((y + 1) * width + x);
       if (bottom && top && bottom.top !== top.bottom) {
-        warnings.push({ x, y, message: `Crosser mismatch: (${x},${y}).top="${bottom.top}" vs (${x},${y + 1}).bottom="${top.bottom}"` });
+        warnings.push({
+          x,
+          y,
+          message: `Crosser mismatch: (${x},${y}).top="${bottom.top}" vs (${x},${y + 1}).bottom="${top.bottom}"`,
+        });
       }
     }
   }

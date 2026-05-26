@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads the plot, areas, and environment section
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, and `## Environment` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -260,7 +260,7 @@ Append an `## Actors` section to `adventure.md` with this structure:
 
 This data is used by downstream skills to select actors for quest roles (`/adventure-quests`) and to know which areas already have creature presence (`/adventure-challenges`).
 
-Repack the module with `repack_module`.
+Save/sync the result. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -357,6 +357,6 @@ Clone each type once with `create_creature_blueprint`, setting `faction=2`.
 - **Always set faction=2.** Never trust the source blueprint's default faction.
 - **Dialog resref must be created before the creature blueprint** that references it (or create them in the right order: dialog first, then blueprint with `conversation` field).
 - **No quest logic in dialogs.** NPCs can hint at the situation but do NOT assign quests, give journal entries, or run scripts. That's `/adventure-quests`'s job.
-- **Repack after placing.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after placing.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 - **Ambient creatures don't get dialogs.** Only key NPCs from the plot get `create_dialog` calls.
 - **Max 16 character resrefs.** NWN has a 16-char limit on resref identifiers.

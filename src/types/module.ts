@@ -78,6 +78,16 @@ export interface TwoDATable {
 /** Parsed TLK string table: strref → text */
 export type TlkTable = Map<number, string>;
 
+export interface NasherSourceContext {
+  type: "nasher";
+  workspaceRoot: string;
+  target?: string;
+  cacheDir: string;
+  targetFile?: string;
+  cleanBuild: boolean;
+  loadedAt: string;
+}
+
 export interface ModuleIndex {
   modPath: string;
   tempDir: string;
@@ -96,4 +106,5 @@ export interface ModuleIndex {
   hakList: string[];
   customTlkName: string;
   loadWarnings: Array<{ type: string; message: string }>;
+  sourceContext?: NasherSourceContext;
 }

@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads the plot section of `adventure.md`, buil
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain a completed `## Plot` section. All sub-skills read from and append to this shared file.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -156,7 +156,7 @@ The result contains `zones`, `crossers`, and `suggestedFeatures` ready to pass d
 
 Execute in this order:
 
-1. **Create the area** — `create_area` with tileset, dimensions, and a resref derived from the area name (lowercase, no spaces, e.g., `darkforest`, `temple_ruins`).
+1. **Create the area** — `create_area` with tileset, dimensions, and a resref derived from the area name (lowercase, no spaces, e.g., `darkforest`, `temple_ruins`). Leave `defaultFillMode` at its default (`relaxed`) unless you need a strictly uniform safe fill.
 
 2. **Paint the layout** — A single `adventure_apply_layout` call with the full `LayoutResult` from `adventure_generate_layout`. Pass `autoRepack: "true"` to save progress to the .mod file immediately (prevents lost work if context runs out). The solver applies all terrain zones, crosser paths, and feature groups atomically.
 
@@ -179,7 +179,7 @@ Execute in this order:
 If the solver warns about missing tile combinations:
 - Simplify terrain (avoid 3+ terrain types meeting at one point)
 - Check available tile combos with `get_tileset_details`
-- Use `paint_tiles` with exact tileId for manual overrides on problem spots
+- Use `paint_terrain` for toolset-style terrain brush fixes, or `paint_tiles` with exact tileId for hard overrides
 
 ---
 
@@ -241,7 +241,7 @@ Where `forwardRotate` for orientation 0-3: case 0=(x,y), case 1=(-y,x), case 2=(
 
 ### Phase 6: Connectivity Validation
 
-Check `adventure_apply_layout` results for `solverWarnings`. If there are crosser mismatch warnings or isolated zones seem likely, call `visualize_area` and check `zones` array — every room must be reachable from every other room. Fix with `paint_tiles` for manual overrides on problem spots.
+Check `adventure_apply_layout` results for `solverWarnings`. If there are crosser mismatch warnings or isolated zones seem likely, call `visualize_area` and check `zones` array — every room must be reachable from every other room. Fix terrain brush issues with `paint_terrain`; use `paint_tiles` only when you need an exact tileId override.
 
 ---
 
@@ -293,7 +293,7 @@ Append an `## Areas` section to `adventure.md` with:
 
 This data is used by downstream skills (`/adventure-environment`, `/adventure-actors`, `/adventure-quests`, `/adventure-challenges`, `/adventure-affordances`) to place content correctly.
 
-Repack the module with `repack_module`.
+Save/sync the result. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -343,7 +343,8 @@ The solver prioritizes preserving crossers over exact corner matching. At a Pit/
 
 - **Tile coordinates:** Column = x (left to right), Row = y (bottom to top). World position = tile * 10.0.
 - **Feature placement:** `paint_group` x,y is the bottom-left corner of the feature group. `adventure_apply_layout` handles this automatically from `suggestedFeatures`.
+- **Group transforms:** `paint_group` accepts `transform: none|rotate90|rotate180|rotate270|random`. Use `random` when you want whole-group variation without breaking the authored footprint.
 - **Zone-based solver:** `adventure_apply_layout` resolves all terrain, crossers, and features atomically.
-- **Manual overrides:** Use `paint_tiles` with exact tileId for tiles the zone solver can't handle.
+- **Manual overrides:** Use `paint_terrain` for terrain brush fixes; use `paint_tiles` with exact tileId for tiles the zone solver can't handle.
 - **Z-height sanity check.** After placing objects or transitions, verify the Z coordinate is near 0 (±0.5). Positions with Z far below 0 (e.g., -2.5) are on depressed terrain like tree borders or cliff edges — the object will appear sunken underground. If `adventure_find_walkable` returns a position with Z < -1.0, discard it and try a different region or use explicit tile-center coordinates (col*10+5, row*10+5) on known floor/clearing tiles.
 - **Do NOT auto-export HTML reports.**

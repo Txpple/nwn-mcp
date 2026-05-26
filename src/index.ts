@@ -9,6 +9,7 @@ import { registerCreatureTools } from "./tools/creature-tools.js";
 import { registerDialogTools } from "./tools/dialog-tools.js";
 import { registerDatabaseTools } from "./tools/database-tools.js";
 import { registerModuleTools } from "./tools/module-tools.js";
+import { registerNasherTools } from "./tools/nasher-tools.js";
 import { registerDialogWriteTools } from "./tools/dialog-write-tools.js";
 import { registerEncounterTools } from "./tools/encounter-tools.js";
 import { registerItemTools } from "./tools/item-tools.js";
@@ -32,6 +33,7 @@ const server = new McpServer({
 
 // ── Base tools: module reading, querying, analysis ──────────────────────
 registerCoreReadTools(server);
+registerNasherTools(server);
 registerAreaTools(server);
 registerCreatureTools(server);
 registerItemTools(server);

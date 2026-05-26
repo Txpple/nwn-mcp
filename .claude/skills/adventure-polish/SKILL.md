@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads all sections of `adventure.md` and syste
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, `## Environment`, `## Actors`, `## Quests`, `## Challenges`, and `## Affordances` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -315,9 +315,9 @@ Append a `## Polish` section to `adventure.md`:
 
 ---
 
-### Phase 11: Repack
+### Phase 11: Save/Sync
 
-Call `repack_module()` to save all changes.
+Save/sync all changes. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -337,7 +337,7 @@ Never skip Blocking or Breaking issues. Minor issues can be documented without f
 ## Important Notes
 
 - **Do NOT auto-export HTML reports.**
-- **Repack after all changes.** Call `repack_module` at the end.
+- **Save/sync after all changes.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 - **Don't rebuild what works.** If a dialog is functional but not perfect, note it — don't rewrite it.
 - **Filter base-game false positives** from `validate_module`. Scripts and items from the base game BIFs (`nw_*`, `x0_*`, `x2_*`) that appear as "missing" are resolved at runtime and are NOT errors.
 - **Trace, don't assume.** Use `flatten_dialog`, `get_area_creatures`, `get_area_doors` to verify — don't assume prior skills did everything correctly.

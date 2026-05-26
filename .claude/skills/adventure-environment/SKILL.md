@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads the plot and areas sections of `adventur
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot` and `## Areas` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -229,7 +229,7 @@ Append an `## Environment` section to `adventure.md` with this structure per are
 
 This data is used by downstream skills to select from existing environment objects for quest purposes.
 
-Repack the module with `repack_module`.
+Save/sync the result. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -356,4 +356,4 @@ When placing placeables, group related objects together (within 2-4m of each oth
 - **Area-wide sounds go at area center.** Radius = `max(width, height) * 10` to cover the entire area.
 - **Waypoint facing matters.** Entrance waypoints face into the area. Landmark waypoints face toward the landmark from the player's approach.
 - **Group name → waypoint label.** Strip dimension suffixes: `"Lodge_2x2"` → `"Lodge"`, `"Temple_3x2"` → `"Temple"`.
-- **Repack after placing.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after placing.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.

@@ -1,17 +1,16 @@
-import { z } from "zod";
-import path from "path";
-import fs from "fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { requireIndex, buildResmanOptions } from "../module-loader.js";
-import { gffToJson, jsonToGff, erfPack } from "../nim-tools.js";
+import fs from "fs/promises";
+import path from "path";
+import { z } from "zod";
+import { buildResmanOptions, requireIndex } from "../module-loader.js";
+import { erfPack, gffToJson, jsonToGff } from "../nim-tools.js";
+import type { GffDocument, GffObj } from "../types/gff.js";
+import { setField } from "../types/gff.js";
 import { setGffByPath } from "../util/gff-path.js";
 import { resolveBlueprint } from "../util/git-helpers.js";
-import { setField } from "../types/gff.js";
-import { optNumParam, toI, toF } from "../util/params.js";
-import type { GffDocument, GffObj } from "../types/gff.js";
+import { optNumParam, toI } from "../util/params.js";
 
 export function registerWriteTools(server: McpServer): void {
-
   server.tool(
     "modify_gff_field",
     "Modify a field in a GFF resource by dot-path. Example path: 'Creature List.0.ChallengeRating'",
@@ -47,18 +46,24 @@ export function registerWriteTools(server: McpServer): void {
       await jsonToGff(doc, entry.filePath);
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            resource: key,
-            path: fieldPath,
-            previousValue: result.previousValue,
-            newValue: value,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                resource: key,
+                path: fieldPath,
+                previousValue: result.previousValue,
+                newValue: value,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
-    }
+    },
   );
 
   server.tool(
@@ -75,17 +80,31 @@ export function registerWriteTools(server: McpServer): void {
       await erfPack(index.tempDir, outPath);
 
       const stat = await fs.stat(outPath);
+      const warnings =
+        index.sourceContext?.type === "nasher"
+          ? [
+              `Loaded module is backed by Nasher cache. Supported write tools auto-sync to ${index.sourceContext.workspaceRoot}; repack_module only writes the packed module file.`,
+            ]
+          : [];
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            outputPath: outPath,
-            sizeBytes: stat.size,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                outputPath: outPath,
+                sizeBytes: stat.size,
+                warningCount: warnings.length,
+                warnings,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
-    }
+    },
   );
 
   server.tool(
@@ -103,9 +122,27 @@ export function registerWriteTools(server: McpServer): void {
       stackSize: optNumParam("Stack size (default 1)"),
       charges: optNumParam("Number of charges (default 0)"),
       addCost: optNumParam("Additional cost modifier"),
-      properties: z.string().optional().describe("JSON array of item properties. Each: {propertyName, subType, costTable, costValue, param1?, param1Value?}. PropertyName from itempropdef.2da. Common: 56=Enhancement Bonus (costValue=bonus 1-20), 16=Damage Bonus (subType=damage type, costTable=2, costValue=amount), 0=Ability Bonus (subType=ability 0-5, costValue=bonus)"),
+      properties: z
+        .string()
+        .optional()
+        .describe(
+          "JSON array of item properties. Each: {propertyName, subType, costTable, costValue, param1?, param1Value?}. PropertyName from itempropdef.2da. Common: 56=Enhancement Bonus (costValue=bonus 1-20), 16=Damage Bonus (subType=damage type, costTable=2, costValue=amount), 0=Ability Bonus (subType=ability 0-5, costValue=bonus)",
+        ),
     },
-    async ({ resref, tag, name, baseItem, sourceResref, cost, description, plot, stackSize, charges, addCost, properties }) => {
+    async ({
+      resref,
+      tag,
+      name,
+      baseItem,
+      sourceResref,
+      cost,
+      description,
+      plot,
+      stackSize,
+      charges,
+      addCost,
+      properties,
+    }) => {
       const index = requireIndex();
       const resrefLower = resref.toLowerCase();
       const key = `${resrefLower}.uti`;
@@ -180,7 +217,7 @@ export function registerWriteTools(server: McpServer): void {
 
         obj.PropertiesList = {
           type: "list",
-          value: parsed.map(p => ({
+          value: parsed.map((p) => ({
             __struct_id: 0,
             PropertyName: { type: "word", value: p.propertyName },
             Subtype: { type: "word", value: p.subType },
@@ -223,12 +260,14 @@ export function registerWriteTools(server: McpServer): void {
       }
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(result, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
       };
-    }
+    },
   );
 
   server.tool(
@@ -280,17 +319,23 @@ export function registerWriteTools(server: McpServer): void {
       });
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            source: sourceKey,
-            created: newKey,
-            sizeBytes: stat.size,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                source: sourceKey,
+                created: newKey,
+                sizeBytes: stat.size,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
-    }
+    },
   );
 
   server.tool(
@@ -317,16 +362,22 @@ export function registerWriteTools(server: McpServer): void {
       const stat = await fs.stat(absOutput);
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            resource: key,
-            outputPath: absOutput,
-            sizeBytes: stat.size,
-          }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                resource: key,
+                outputPath: absOutput,
+                sizeBytes: stat.size,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
-    }
+    },
   );
 }

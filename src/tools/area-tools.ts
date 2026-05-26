@@ -1,12 +1,12 @@
-import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { requireIndex } from "../module-loader.js";
+import { syncNasherSourceForIndex } from "../nasher-sync.js";
 import { jsonToGff } from "../nim-tools.js";
-import { getFieldStr, getFieldNum, getFieldLocStr, getFieldList, setField } from "../types/gff.js";
 import type { GffObj } from "../types/gff.js";
+import { getFieldList, getFieldLocStr, getFieldNum, getFieldStr, setField } from "../types/gff.js";
 
 export function registerAreaTools(server: McpServer): void {
-
   server.tool(
     "list_areas",
     "List all areas in the module with dimensions and object counts.",
@@ -16,7 +16,7 @@ export function registerAreaTools(server: McpServer): void {
       const index = requireIndex();
       const areas = [...index.areas.values()];
       return { content: [{ type: "text", text: JSON.stringify(areas, null, 2) }] };
-    }
+    },
   );
 
   server.tool(
@@ -83,7 +83,7 @@ export function registerAreaTools(server: McpServer): void {
       }
 
       return { content: [{ type: "text", text: JSON.stringify(details, null, 2) }] };
-    }
+    },
   );
 
   server.tool(
@@ -93,9 +93,9 @@ export function registerAreaTools(server: McpServer): void {
     { readOnlyHint: true, idempotentHint: true },
     async ({ area }) => {
       const index = requireIndex();
-      const areaCreatures = index.creatures.filter(c => c.area === area);
+      const areaCreatures = index.creatures.filter((c) => c.area === area);
       return { content: [{ type: "text", text: JSON.stringify(areaCreatures, null, 2) }] };
-    }
+    },
   );
 
   server.tool(
@@ -109,10 +109,10 @@ export function registerAreaTools(server: McpServer): void {
       if (!gitDoc) return { content: [{ type: "text", text: `Area GIT not found: ${area}` }] };
 
       const git = gitDoc as GffObj;
-      const placeables = getFieldList(git, "Placeable List").map(p => {
+      const placeables = getFieldList(git, "Placeable List").map((p) => {
         const hasInventory = getFieldNum(p, "HasInventory") === 1;
         const inventory = hasInventory
-          ? getFieldList(p, "ItemList").map(item => ({
+          ? getFieldList(p, "ItemList").map((item) => ({
               resref: getFieldStr(item, "InventoryRes") || getFieldStr(item, "TemplateResRef"),
               name: getFieldLocStr(item, "LocalizedName") || getFieldLocStr(item, "LocName"),
               baseItem: getFieldNum(item, "BaseItem"),
@@ -137,7 +137,7 @@ export function registerAreaTools(server: McpServer): void {
       });
 
       return { content: [{ type: "text", text: JSON.stringify(placeables, null, 2) }] };
-    }
+    },
   );
 
   server.tool(
@@ -152,7 +152,7 @@ export function registerAreaTools(server: McpServer): void {
 
       const git = gitDoc as GffObj;
       const itemList = getFieldList(git, "List");
-      const items = itemList.map(item => ({
+      const items = itemList.map((item) => ({
         tag: getFieldStr(item, "Tag"),
         name: getFieldLocStr(item, "LocalizedName") || getFieldLocStr(item, "LocName"),
         templateResRef: getFieldStr(item, "TemplateResRef"),
@@ -167,7 +167,7 @@ export function registerAreaTools(server: McpServer): void {
       }));
 
       return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
-    }
+    },
   );
 
   server.tool(
@@ -181,7 +181,7 @@ export function registerAreaTools(server: McpServer): void {
       if (!gitDoc) return { content: [{ type: "text", text: `Area GIT not found: ${area}` }] };
 
       const git = gitDoc as GffObj;
-      const doors = getFieldList(git, "Door List").map(d => ({
+      const doors = getFieldList(git, "Door List").map((d) => ({
         tag: getFieldStr(d, "Tag"),
         name: getFieldLocStr(d, "LocName"),
         templateResRef: getFieldStr(d, "TemplateResRef"),
@@ -197,7 +197,7 @@ export function registerAreaTools(server: McpServer): void {
       }));
 
       return { content: [{ type: "text", text: JSON.stringify(doors, null, 2) }] };
-    }
+    },
   );
 
   // ─── set_area_scripts ─────────────────────────────────────���─────────────
@@ -242,16 +242,26 @@ export function registerAreaTools(server: McpServer): void {
       }
 
       if (changes.length === 0) {
-        return { content: [{ type: "text", text: "No scripts provided. Pass at least one of: onEnter, onExit, onHeartbeat, onUserDefined." }] };
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No scripts provided. Pass at least one of: onEnter, onExit, onHeartbeat, onUserDefined.",
+            },
+          ],
+        };
       }
 
       await jsonToGff(areDoc, areEntry.filePath);
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "set_area_scripts" });
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ success: true, area, changes }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ success: true, area, changes, ...(nasherSync ? { nasherSync } : {}) }, null, 2),
+          },
+        ],
       };
     },
   );
@@ -305,12 +315,15 @@ export function registerAreaTools(server: McpServer): void {
       }
 
       await jsonToGff(ifoDoc, ifoEntry.filePath);
+      const nasherSync = await syncNasherSourceForIndex(index, { reason: "set_module_scripts" });
 
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ success: true, changes }, null, 2),
-        }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ success: true, changes, ...(nasherSync ? { nasherSync } : {}) }, null, 2),
+          },
+        ],
       };
     },
   );

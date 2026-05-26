@@ -27,6 +27,7 @@ Designed for two workflows:
 - [Node.js](https://nodejs.org/) v18+
 - [neverwinter.nim tools](https://github.com/niv/neverwinter.nim/releases) — `nwn_erf`, `nwn_gff`, `nwn_script_comp`, `nwn_twoda`, `nwn_resman_cat`
 - Neverwinter Nights: Enhanced Edition (for base game data)
+- Optional: [Nasher](https://github.com/squattingmonk/nasher) and NWNT for Nasher text-source projects
 - MCP-compatible AI client (Claude Code, Claude Desktop, VS Code, etc.)
 
 ## Installation
@@ -53,6 +54,7 @@ Add the server to your MCP client config. The config location depends on your cl
 | Claude Code | `.claude/settings.json` or `.mcp.json` in your project |
 | Claude Desktop | `claude_desktop_config.json` |
 | VS Code | MCP settings in `.vscode/mcp.json` |
+| Codex CLI | `~/.codex/config.toml` or `codex mcp add` |
 
 ```json
 {
@@ -64,19 +66,64 @@ Add the server to your MCP client config. The config location depends on your cl
       "env": {
         "NIM_FOLDER_NWTOOLS": "/path/to/neverwinter-nim-tools",
         "NWN_FOLDER_DATA": "/path/to/Neverwinter Nights",
-        "NWN_FOLDER_USER": "/path/to/Documents/Neverwinter Nights"
+        "NWN_FOLDER_USER": "/path/to/Documents/Neverwinter Nights",
+        "MCP_FOLDER_TEMP": "/path/to/temp",
+        "MCP_FOLDER_USERREPORTS": "/path/to/reports",
+        "NASHER_BIN": "nasher",
+        "NWNT_BIN": "nwn_nwnt"
       }
     }
   }
 }
 ```
 
+**Codex CLI example:**
+
+Codex stores MCP servers in `$CODEX_HOME/config.toml` (usually `~/.codex/config.toml`). The `codex mcp add` command writes the executable and args directly, so point the command at the built server with an absolute path:
+
+```toml
+[mcp_servers.nwn-mcp]
+command = "node"
+args = ["/path/to/nwn-mcp/dist/index.js"]
+
+[mcp_servers.nwn-mcp.env]
+NIM_FOLDER_NWTOOLS = "/path/to/neverwinter-nim-tools"
+NWN_FOLDER_DATA = "/path/to/Neverwinter Nights"
+NWN_FOLDER_USER = "/path/to/Documents/Neverwinter Nights"
+MCP_FOLDER_TEMP = "/path/to/temp"
+MCP_FOLDER_USERREPORTS = "/path/to/reports"
+NASHER_BIN = "nasher"
+NWNT_BIN = "nwn_nwnt"
+```
+
+Equivalent command:
+
+```bash
+codex mcp add nwn-mcp \
+  --env NIM_FOLDER_NWTOOLS=/path/to/neverwinter-nim-tools \
+  --env NWN_FOLDER_DATA="/path/to/Neverwinter Nights" \
+  --env NWN_FOLDER_USER="/path/to/Documents/Neverwinter Nights" \
+  --env MCP_FOLDER_TEMP=/path/to/temp \
+  --env MCP_FOLDER_USERREPORTS=/path/to/reports \
+  --env NASHER_BIN=nasher \
+  --env NWNT_BIN=nwn_nwnt \
+  -- node /path/to/nwn-mcp/dist/index.js
+```
+
+For a standalone `.mod` workflow, omit the `NASHER_BIN` and `NWNT_BIN` lines. For a Nasher workflow, start Codex from the Nasher project root, pass `workspaceRoot` to `load_nasher_workspace`, or pass an absolute path inside the Nasher project to `load_module`.
+
+The `NASHER_BIN` and `NWNT_BIN` entries are only needed for Nasher text-source projects. If `nasher` and `nwn_nwnt` are already on `PATH`, the default command names are enough; set absolute executable paths when your MCP client does not inherit that `PATH`.
+
 **Windows paths example:**
 ```json
 {
   "NIM_FOLDER_NWTOOLS": "C:/tools/neverwinter.nim/bin",
   "NWN_FOLDER_DATA": "C:/Program Files (x86)/Steam/steamapps/common/Neverwinter Nights",
-  "NWN_FOLDER_USER": "C:/Users/you/Documents/Neverwinter Nights"
+  "NWN_FOLDER_USER": "C:/Users/you/Documents/Neverwinter Nights",
+  "MCP_FOLDER_TEMP": "C:/Users/you/AppData/Local/Temp/nwn-mcp",
+  "MCP_FOLDER_USERREPORTS": "C:/Users/you/Documents/Neverwinter Nights/reports",
+  "NASHER_BIN": "C:/tools/nasher/nasher.exe",
+  "NWNT_BIN": "C:/tools/nwnt/nwn_nwnt.exe"
 }
 ```
 
@@ -89,6 +136,8 @@ Add the server to your MCP client config. The config location depends on your cl
 | `NWN_FOLDER_USER` | Yes | | NWN user documents directory (HAKs, overrides, modules) |
 | `MCP_FOLDER_TEMP` | No | `%TEMP%/nwn-mcp` | Temp directory for extracted modules |
 | `MCP_FOLDER_USERREPORTS` | No | | Directory for exported reports |
+| `NASHER_BIN` | No | `nasher` | Nasher executable for optional Nasher project workflows |
+| `NWNT_BIN` | No | `nwn_nwnt` | NWNT executable for Nasher diagnostics |
 
 ## Usage
 
@@ -109,7 +158,58 @@ Then use any of the 110+ tools to inspect and modify the module. Ask your AI ass
 - "Add some new power scripts to my custom feats"
 - "Validate the module and check for broken references"
 
-Changes are written back to the `.mod` file via `repack_module`.
+Changes are written back to standalone `.mod` files via `repack_module`.
+
+### Nasher Projects
+
+For a Nasher text-source repository, `load_module` can remain the entry point. When `nasher.cfg` is detected from the MCP cwd or the provided module path, `load_module` automatically routes through the Nasher workflow and returns a reminder without stopping for confirmation. An absolute path outside the detected Nasher workspace is still treated as a standalone `.mod` load.
+
+1. Call `load_module` with the module filename or target. In a Nasher project this runs `load_nasher_workspace` under the hood.
+2. Optionally call `detect_nasher_project` to verify `nasher.cfg`, Nasher/NWNT availability, targets, and cache paths.
+3. Optionally call `load_nasher_workspace` directly with `workspaceRoot`, `target`, and `clean` when you need explicit target or clean-build control. This runs `nasher pack`, then loads `.nasher/cache/<target>` as loose module resources.
+4. Use the normal read/write tools. Edits are made in the Nasher cache directory; supported write tools automatically run `nasher unpack --file:<cacheDir>` to copy cache edits back into the text source tree.
+5. Optionally call `sync_nasher_source` to rerun the unpack step explicitly, or with `removeDeleted: true` after manual cache cleanup.
+6. Review source changes with `git diff`.
+
+Auto-sync coverage currently includes area create/delete/paint/property updates, area/module script setters, `adventure_apply_layout`, and GIT object writes that go through `writeBackGit()`. If a write response does not include `nasherSync` (for example arbitrary GFF/resource edits, blueprint creation, or dialog writes), call `sync_nasher_source` before reviewing the Nasher source tree.
+
+`clean: true` runs `nasher pack --clean` and rebuilds the cache. Supported MCP writes auto-sync to source, but manual cache-only edits can still be discarded. Use `nasher_status` to inspect the loaded Nasher context and likely stale-cache signals. `repack_module` still works, but when a Nasher workspace is loaded it only writes the packed module file; Nasher text sources remain the source of truth.
+
+### Workflow Comparison
+
+| Step | Standalone `.mod` | Nasher text-source repo |
+|------|-------------------|-------------------------|
+| Load | `load_module` | `load_module` auto-routes to `load_nasher_workspace` |
+| Source of truth | Packed `.mod` file | Nasher text sources |
+| Build boundary | `nwn_erf` extracts into temp dir | `nasher pack` fills `.nasher/cache/<target>` |
+| Edit surface | Extracted loose module files | Loose files in Nasher cache |
+| Save back | `repack_module` writes `.mod` | Supported write tools auto-run `nasher unpack`; `sync_nasher_source` can rerun it |
+
+Standalone `.mod` workflow:
+
+```mermaid
+flowchart LR
+  A[load_module] --> B[nwn_erf extract .mod]
+  B --> C[temp dir / ModuleIndex]
+  C --> D[nwn_gff parse and write JSON]
+  D --> E[repack_module]
+  E --> F[nwn_erf pack .mod]
+```
+
+Nasher workflow:
+
+```mermaid
+flowchart LR
+  A[load_module] --> B{nasher.cfg detected}
+  B --> C[load_nasher_workspace]
+  C --> D[nasher pack]
+  D --> E[.nasher/cache/<target>]
+  E --> F[nwn-mcp edits loose resources]
+  F --> G[automatic Nasher source sync]
+  G --> H[nasher unpack]
+  H --> I[text source tree]
+  I -. optional rerun .-> J[sync_nasher_source]
+```
 
 ### Special Commands
 
@@ -153,6 +253,7 @@ Just describe the kind of adventure you want to play and your party size and lev
 - `create_area` — create a new area with terrain tiles
 - `get_area_details` — area properties, lighting, weather, music
 - `set_area_properties` — modify lighting, fog, music, weather
+- `paint_terrain` — paint terrain by name and re-solve toolset-style edge tiles
 - `paint_tiles` — set exact tile IDs on specific positions (direct placement)
 - `paint_group` — place multi-tile groups (temples, lodges, etc.)
 - `adventure_apply_layout` — apply a full layout atomically: zones + crossers + features via zone solver (adventure tool)
@@ -194,7 +295,8 @@ Just describe the kind of adventure you want to play and your party size and lev
 
 ### Module Management
 
-- `load_module` / `repack_module` — load and save modules
+- `load_module` / `repack_module` — load modules and pack standalone `.mod` output
+- `detect_nasher_project` / `load_nasher_workspace` / `sync_nasher_source` / `nasher_status` — optional Nasher text-source workflow
 - `get_module_info` / `get_module_summary` — module metadata and overview
 - `undo_last_change` / `undo_history` — revert recent changes
 
@@ -216,6 +318,8 @@ Tools specific to the `/create-adventure` pipeline for autonomous module buildin
     --> MCP tool handlers serve queries & modifications
       --> nwn_gff (serialize back) --> nwn_erf (repack) --> .mod file
 ```
+
+Nasher workflow uses `.nasher/cache/<target>` as the integration boundary: Nasher converts source text to loose resources, `nwn-mcp` edits those loose resources, then supported write tools automatically ask Nasher to unpack the cache back to source text.
 
 One module is loaded at a time. The server builds a full resource manager stack on load — base game BIFs, module HAKs, user overrides, and module resources — giving tools access to the complete data hierarchy.
 

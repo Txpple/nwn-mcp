@@ -11,7 +11,7 @@ Sub-skill of `/create-adventure`. Reads all prior sections of `adventure.md`, th
 ## Prerequisites
 
 - `adventure.md` must exist in the MCP temp directory (`$MCP_FOLDER_TEMP`, defaults to `$TEMP/nwn-mcp` or `/tmp/nwn-mcp`) and contain completed `## Plot`, `## Areas`, `## Environment`, `## Actors`, `## Quests`, and `## Challenges` sections.
-- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`.
+- A module must be loaded. If none is loaded, call `load_module` using the module name from `adventure.md`; it auto-routes when a Nasher project is detected.
 
 ## Workflow
 
@@ -445,9 +445,9 @@ This data is used by downstream skill:
 
 ---
 
-### Phase 14: Repack
+### Phase 14: Save/Sync
 
-Call `repack_module()` to save all changes.
+Save/sync all changes. For standalone `.mod` workflows, call `repack_module`. For Nasher workflows, call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.
 
 ---
 
@@ -509,4 +509,4 @@ Use base game item costs. If a store's total affordable inventory exceeds starti
 - **Browse wares on all greetings.** If `/adventure-quests` added multiple condition-gated root entries to the NPC's dialog, add the "browse wares" reply to each greeting entry so it's always accessible.
 - **Module script conflicts.** Always check `get_module_info` for an existing `Mod_OnClientEntr` script before writing a new one. Extend, don't replace.
 - **Gold is generous, not excessive.** The player should be able to buy core gear (weapon + armor + potions) but not everything in the store. This creates meaningful choices.
-- **Repack after all changes.** Call `repack_module` at the end so the user can see changes in the toolset.
+- **Save/sync after all changes.** Standalone `.mod`: call `repack_module`. Nasher: call `sync_nasher_source` at the end if any write response lacked `nasherSync` or if you are unsure; call `repack_module` only when a packed `.mod` is needed.

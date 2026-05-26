@@ -10,14 +10,15 @@
  * - buildMinimalUtc: Build a minimal UTC creature document from scratch
  */
 
-import path from "path";
 import fs from "fs/promises";
-
-import { gffToJson, jsonToGff, resmanExtractToJson } from "../nim-tools.js";
+import path from "path";
+import type { NasherSyncResult } from "../nasher-sync.js";
+import { syncNasherSourceForIndex } from "../nasher-sync.js";
 import type { ResmanOptions } from "../nim-tools.js";
+import { gffToJson, jsonToGff, resmanExtractToJson } from "../nim-tools.js";
 import { invalidateTagToAreaCache } from "../tools/tileset-tools.js";
-import { getFieldList } from "../types/gff.js";
 import type { GffDocument, GffObj } from "../types/gff.js";
+import { getFieldList } from "../types/gff.js";
 import type { ModuleIndex } from "../types/module.js";
 
 /** Resolve a blueprint from module cache, disk, or resman (base game/HAKs). */
@@ -64,7 +65,11 @@ export function getGitDoc(index: ModuleIndex, areaResref: string): { doc: GffDoc
 }
 
 /** Write GIT back to disk. Invalidates derived caches. */
-export async function writeBackGit(index: ModuleIndex, areaResref: string, doc: GffDocument): Promise<void> {
+export async function writeBackGit(
+  index: ModuleIndex,
+  areaResref: string,
+  doc: GffDocument,
+): Promise<NasherSyncResult | undefined> {
   const key = `${areaResref.toLowerCase()}.git`;
   const entry = index.resources.get(key);
   if (entry) {
@@ -73,6 +78,7 @@ export async function writeBackGit(index: ModuleIndex, areaResref: string, doc: 
   }
   // Sync the GIC file so the toolset can see all placed objects.
   await syncGic(index, areaResref, doc);
+  return syncNasherSourceForIndex(index, { reason: `writeBackGit:${areaResref.toLowerCase()}` });
 }
 
 /**
@@ -92,9 +98,14 @@ async function syncGic(index: ModuleIndex, areaResref: string, gitDoc: GffDocume
   const git = gitDoc as GffObj;
 
   const listNames = [
-    "Creature List", "Door List", "Encounter List",
-    "Placeable List", "SoundList", "StoreList",
-    "TriggerList", "WaypointList",
+    "Creature List",
+    "Door List",
+    "Encounter List",
+    "Placeable List",
+    "SoundList",
+    "StoreList",
+    "TriggerList",
+    "WaypointList",
   ];
 
   for (const listName of listNames) {
@@ -127,7 +138,7 @@ export function updateAreaCounts(index: ModuleIndex, areaResref: string): void {
 
 /** Convert degrees to radians. */
 export function degToRad(degrees: number): number {
-  return degrees * Math.PI / 180;
+  return (degrees * Math.PI) / 180;
 }
 
 /** Build a minimal UTE encounter document from scratch. */
@@ -139,14 +150,34 @@ export function buildMinimalUte(): GffDocument {
     CreatureList: { type: "list", value: [] },
     Difficulty: { type: "int", value: 0 },
     DifficultyIndex: { type: "int", value: 1 },
-    Faction: { type: "dword", value: 1 },       // Hostile
+    Faction: { type: "dword", value: 1 }, // Hostile
     Geometry: {
       type: "list",
       value: [
-        { __struct_id: 0, X: { type: "float", value: -5.0 }, Y: { type: "float", value: -5.0 }, Z: { type: "float", value: 0.0 } },
-        { __struct_id: 0, X: { type: "float", value:  5.0 }, Y: { type: "float", value: -5.0 }, Z: { type: "float", value: 0.0 } },
-        { __struct_id: 0, X: { type: "float", value:  5.0 }, Y: { type: "float", value:  5.0 }, Z: { type: "float", value: 0.0 } },
-        { __struct_id: 0, X: { type: "float", value: -5.0 }, Y: { type: "float", value:  5.0 }, Z: { type: "float", value: 0.0 } },
+        {
+          __struct_id: 0,
+          X: { type: "float", value: -5.0 },
+          Y: { type: "float", value: -5.0 },
+          Z: { type: "float", value: 0.0 },
+        },
+        {
+          __struct_id: 0,
+          X: { type: "float", value: 5.0 },
+          Y: { type: "float", value: -5.0 },
+          Z: { type: "float", value: 0.0 },
+        },
+        {
+          __struct_id: 0,
+          X: { type: "float", value: 5.0 },
+          Y: { type: "float", value: 5.0 },
+          Z: { type: "float", value: 0.0 },
+        },
+        {
+          __struct_id: 0,
+          X: { type: "float", value: -5.0 },
+          Y: { type: "float", value: 5.0 },
+          Z: { type: "float", value: 0.0 },
+        },
       ],
     },
     LocalizedName: { type: "cexolocstring", value: { "0": "Encounter" } },
@@ -194,13 +225,7 @@ export function buildMinimalUtm(): GffDocument {
     StoreGold: { type: "int", value: -1 },
     StoreList: {
       type: "list",
-      value: [
-        makeCategory(0),
-        makeCategory(1),
-        makeCategory(2),
-        makeCategory(3),
-        makeCategory(4),
-      ],
+      value: [makeCategory(0), makeCategory(1), makeCategory(2), makeCategory(3), makeCategory(4)],
     },
     Tag: { type: "cexostring", value: "" },
     TemplateResRef: { type: "resref", value: "" },
@@ -219,11 +244,13 @@ export function buildMinimalUtc(): GffDocument {
     ChallengeRating: { type: "float", value: 0 },
     ClassList: {
       type: "list",
-      value: [{
-        __struct_id: 2,
-        Class: { type: "int", value: 0 },   // Barbarian (placeholder)
-        ClassLevel: { type: "short", value: 1 },
-      }],
+      value: [
+        {
+          __struct_id: 2,
+          Class: { type: "int", value: 0 }, // Barbarian (placeholder)
+          ClassLevel: { type: "short", value: 1 },
+        },
+      ],
     },
     Con: { type: "byte", value: 10 },
     Conversation: { type: "resref", value: "" },
@@ -253,7 +280,7 @@ export function buildMinimalUtc(): GffDocument {
     PerceptionRange: { type: "byte", value: 11 },
     Phenotype: { type: "int", value: 0 },
     Plot: { type: "byte", value: 0 },
-    Race: { type: "byte", value: 6 },       // Human
+    Race: { type: "byte", value: 6 }, // Human
     ScriptAttacked: { type: "resref", value: "nw_c2_default5" },
     ScriptDamaged: { type: "resref", value: "nw_c2_default6" },
     ScriptDeath: { type: "resref", value: "nw_c2_default7" },
